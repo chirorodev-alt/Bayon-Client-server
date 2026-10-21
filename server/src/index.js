@@ -3,9 +3,16 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import fs from 'node:fs';
+import path from 'node:path';
+import https from 'node:https';
+import { fileURLToPath } from 'node:url';
 import { loadDb, saveDb } from './db.js';
 
 dotenv.config();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const serversFile = path.join(__dirname, '..', 'data', 'servers.json');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -246,10 +253,165 @@ app.get('/api/auth/me', (req, res) => {
   }
 });
 
+// ── Partner Servers Directory & Live Status ───────────────────────────────────
+function loadServersConfig() {
+  try {
+    if (fs.existsSync(serversFile)) {
+      const content = fs.readFileSync(serversFile, 'utf8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.error('Failed reading servers.json:', err);
+  }
+  return [];
+}
+
+function saveServersConfig(list) {
+  try {
+    fs.mkdirSync(path.dirname(serversFile), { recursive: true });
+    fs.writeFileSync(serversFile, JSON.stringify(list, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed saving servers.json:', err);
+  }
+}
+
+// In-memory cache for live pinging: { [address]: { timestamp, data } }
+const pingCache = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+function fetchServerPing(address) {
+  return new Promise((resolve) => {
+    const cached = pingCache.get(address);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return resolve(cached.data);
+    }
+
+    const url = `https://api.mcsrvstat.us/3/${encodeURIComponent(address)}`;
+    const req = https.get(url, { headers: { 'User-Agent': 'BayonClient/1.0' }, timeout: 4000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          const online = Boolean(parsed.online);
+          const onlinePlayers = parsed.players?.online ?? 0;
+          const maxPlayers = parsed.players?.max ?? 0;
+          const formattedCount = onlinePlayers >= 1000 ? `${(onlinePlayers / 1000).toFixed(1)}k` : `${onlinePlayers}`;
+
+          const result = {
+            online,
+            onlinePlayers,
+            maxPlayers,
+            formattedCount,
+            motd: parsed.motd?.clean?.[0] || '',
+          };
+          pingCache.set(address, { timestamp: Date.now(), data: result });
+          resolve(result);
+        } catch {
+          resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+        }
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+    });
+
+    req.on('error', () => {
+      resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+    });
+  });
+}
+
+// Get all partner servers with live updated player counts and status
+app.get('/api/servers', async (req, res) => {
+  try {
+    const servers = loadServersConfig();
+    const enriched = await Promise.all(
+      servers.map(async (server) => {
+        const ping = await fetchServerPing(server.address);
+        return {
+          ...server,
+          ...ping,
+        };
+      })
+    );
+    res.json({ servers: enriched });
+  } catch (err) {
+    console.error('Error fetching partner servers:', err);
+    res.status(500).json({ error: 'Failed to fetch servers.' });
+  }
+});
+
+// Add or update a partner server in servers.json
+app.post('/api/servers', (req, res) => {
+  const { name, address, icon, color = 'server-blue', flag = 'Partner' } = req.body || {};
+  if (!name || !address) {
+    return res.status(400).json({ error: 'Name and address are required.' });
+  }
+
+  const list = loadServersConfig();
+  const id = req.body.id || name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const existingIndex = list.findIndex((s) => s.id === id);
+
+  const newEntry = {
+    id,
+    name,
+    address,
+    icon: icon || name.charAt(0).toUpperCase(),
+    color,
+    flag,
+  };
+
+  if (existingIndex >= 0) {
+    list[existingIndex] = { ...list[existingIndex], ...newEntry };
+  } else {
+    list.push(newEntry);
+  }
+
+  saveServersConfig(list);
+  res.status(201).json({ success: true, server: newEntry });
+});
+
+// Delete a partner server
+app.delete('/api/servers/:id', (req, res) => {
+  const { id } = req.params;
+  const list = loadServersConfig();
+  const filtered = list.filter((s) => s.id !== id);
+
+  if (filtered.length === list.length) {
+    return res.status(404).json({ error: 'Server not found.' });
+  }
+
+  saveServersConfig(filtered);
+  res.json({ success: true, message: 'Server removed.' });
+});
+
+// ── 24/7 Keep-Alive Self-Ping ─────────────────────────────────────────────────
+const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || process.env.SERVER_URL || 'https://bayon-backend.onrender.com';
+if (keepAliveUrl) {
+  const PING_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+  setInterval(() => {
+    try {
+      const pingEndpoint = `${keepAliveUrl.replace(/\/+$/, '')}/api/health`;
+      https.get(pingEndpoint, (res) => {
+        console.log(`[Keep-Alive 24/7] Pinged ${pingEndpoint} -> status ${res.statusCode}`);
+      }).on('error', (err) => {
+        console.warn(`[Keep-Alive 24/7] Ping error: ${err.message}`);
+      });
+    } catch (err) {
+      console.warn(`[Keep-Alive 24/7] Loop error: ${err.message}`);
+    }
+  }, PING_INTERVAL_MS);
+  console.log(`[Keep-Alive 24/7] Active: pinging ${keepAliveUrl} every 10 min to keep awake 24/7`);
+}
+
 // ── Start Server ──────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Bayon Server] Running on http://0.0.0.0:${PORT}`);
   console.log(`[Bayon Server] Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`[Bayon Server] Friends API:  http://0.0.0.0:${PORT}/api/friends`);
+  console.log(`[Bayon Server] Servers API:  http://0.0.0.0:${PORT}/api/servers`);
 });
 

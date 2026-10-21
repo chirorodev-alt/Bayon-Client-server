@@ -1,0 +1,34 @@
+[
+  {
+    "id": "hypixel",
+    "name": "Hypixel",
+    "address": "mc.hypixel.net",
+    "icon": "H",
+    "color": "server-yellow",
+    "flag": "Featured"
+  },
+  {
+    "id": "cubecraft",
+    "name": "CubeCraft",
+    "address": "play.cubecraft.net",
+    "icon": "C",
+    "color": "server-blue",
+    "flag": "Partner"
+  },
+  {
+    "id": "manacube",
+    "name": "ManaCube",
+    "address": "play.manacube.com",
+    "icon": "M",
+    "color": "server-pink",
+    "flag": "SMP"
+  },
+  {
+    "id": "pvpland",
+    "name": "PvP Land",
+    "address": "pvp.land",
+    "icon": "P",
+    "color": "server-red",
+    "flag": "Practice"
+  }
+]

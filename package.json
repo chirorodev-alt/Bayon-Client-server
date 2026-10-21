@@ -2,7 +2,7 @@
   "name": "bayon-client",
   "productName": "Bayon Client",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -11,6 +11,8 @@
     "dev:renderer": "vite --host localhost --strictPort",
     "electron": "node electron/run.js .",
     "build": "tsc -b && vite build",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir",
     "test": "vitest run",
     "lint": "oxlint .",
     "preview": "vite preview",
@@ -49,10 +51,37 @@
     "appId": "com.bayon.client",
     "productName": "Bayon Client",
     "directories": {
+      "output": "release",
       "buildResources": "public"
     },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!server/**/*"
+    ],
     "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/bayon-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "icon": "public/bayon-icon.png"

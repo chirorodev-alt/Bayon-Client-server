@@ -32,6 +32,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useFriends } from './hooks/useFriends';
+import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource } from './services/modCatalog';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
@@ -221,6 +222,7 @@ function Sidebar() {
 function HomePage() {
   const navigate = useNavigate();
   const friendsState = useFriends();
+  const serversState = useServers();
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const [selectedVersion, setSelectedVersion] = useState('1.21.1');
   const [selectedLoader, setSelectedLoader] = useState('Fabric');
@@ -343,14 +345,55 @@ function HomePage() {
         <button type="button" className="rail-panel store-panel" onClick={() => navigate('/store')}><ShoppingCart className="h-6 w-6" /><span><strong>Store</strong><small>Cosmetics, Ranks &amp; More</small></span><ChevronRight className="ml-auto h-4 w-4" /></button>
         <section className="rail-panel servers-panel">
           <div className="rail-heading"><h2>Partner Servers</h2></div>
-          <div className="rail-empty-state"><strong>No server directory connected</strong><span>Live partner listings will appear here when a server source is connected.</span></div>
+          {serversState.loading ? (
+            <div className="rail-empty-state"><strong>Loading servers…</strong><span>Fetching live partner directory.</span></div>
+          ) : serversState.error ? (
+            <div className="rail-empty-state">
+              <strong>Servers unavailable</strong>
+              <span>{serversState.error}</span>
+              <button type="button" onClick={serversState.refresh}>Retry</button>
+            </div>
+          ) : serversState.servers.length === 0 ? (
+            <div className="rail-empty-state"><strong>No servers listed</strong><span>Partner servers will appear here.</span></div>
+          ) : (
+            serversState.servers.map((server) => (
+              <div className="server-row" key={server.id} title={`${server.name} — ${server.address}`}>
+                <div className={`server-icon ${server.color || 'server-blue'}`}>
+                  {server.icon || server.name.charAt(0)}
+                </div>
+                <div className="server-copy">
+                  <strong>{server.name}</strong>
+                  <small>{server.flag ? `${server.flag} • ${server.address}` : server.address}</small>
+                </div>
+                <div className="server-count">
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <i style={{
+                      display: 'inline-block',
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: server.online ? '#4ade80' : '#ef4444',
+                    }} />
+                    {server.formattedCount || `${server.onlinePlayers ?? 0}`}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
         </section>
         <section className="rail-panel friends-panel">
           <div className="rail-heading"><h2><UsersRound className="h-3.5 w-3.5" /> Friends</h2><button type="button" onClick={() => navigate('/accounts')}>View All <ChevronRight className="h-3 w-3" /></button></div>
           {friendsState.loading ? (
             <div className="rail-empty-state"><strong>Loading friends…</strong><span>Checking the local friends service.</span></div>
           ) : friendsState.error ? (
-            <div className="rail-empty-state"><strong>Friends service unavailable</strong><span>{friendsState.error}</span><button type="button" onClick={friendsState.refresh}>Retry</button></div>
+            <div className="rail-empty-state">
+              <strong>Friends service unavailable</strong>
+              <span>{friendsState.error}</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button type="button" onClick={friendsState.refresh}>Retry</button>
+                <button type="button" onClick={() => navigate('/settings')}>Settings</button>
+              </div>
+            </div>
           ) : friendsState.friends.length === 0 ? (
             <div className="rail-empty-state"><strong>No friends returned</strong><span>The connected service has no friends to display.</span></div>
           ) : friendsState.friends.slice(0, 5).map((friend) => (
@@ -1113,6 +1156,16 @@ function SettingsPage() {
             <div>
               <Label>Animation</Label>
               <Select value={settings.animationLevel} onChange={settings.setAnimationLevel} options={['Smooth', 'Balanced', 'Minimal']} />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Backend Server URL</Label>
+              <input
+                value={settings.backendUrl}
+                onChange={(e) => settings.setBackendUrl(e.target.value)}
+                placeholder="https://bayon-backend.onrender.com"
+                className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20"
+              />
+              <p className="mt-1 text-xs text-white/40">URL of your hosted backend on Render for Friends and Presence</p>
             </div>
             <SettingRow label="Reduce motion"><Toggle checked={settings.reduceMotion} onChange={settings.setReduceMotion} /></SettingRow>
           </div>

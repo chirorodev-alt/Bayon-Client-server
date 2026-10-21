@@ -15,6 +15,7 @@ export type SettingsState = {
   customArgs: string;
   animationLevel: string;
   reduceMotion: boolean;
+  backendUrl: string;
   setLaunchOnStartup: (value: boolean) => void;
   setMinimizeToTray: (value: boolean) => void;
   setDiscordPresence: (value: boolean) => void;
@@ -28,6 +29,7 @@ export type SettingsState = {
   setCustomArgs: (value: string) => void;
   setAnimationLevel: (value: string) => void;
   setReduceMotion: (value: boolean) => void;
+  setBackendUrl: (value: string) => void;
   resetDefaults: () => void;
 };
 
@@ -45,6 +47,7 @@ const defaultSettings = {
   customArgs: '-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC',
   animationLevel: 'Smooth',
   reduceMotion: false,
+  backendUrl: 'https://bayon-backend.onrender.com',
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -64,6 +67,7 @@ export const useSettingsStore = create<SettingsState>()(
       setCustomArgs: (value) => set({ customArgs: value }),
       setAnimationLevel: (value) => set({ animationLevel: value }),
       setReduceMotion: (value) => set({ reduceMotion: value }),
+      setBackendUrl: (value) => set({ backendUrl: value }),
       resetDefaults: () => set(defaultSettings),
     }),
     { name: 'bayon-client-settings' },

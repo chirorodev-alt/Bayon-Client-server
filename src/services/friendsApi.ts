@@ -1,3 +1,5 @@
+import { useSettingsStore } from '../store/useSettingsStore';
+
 export type FriendPresence = 'online' | 'offline' | 'in_game';
 
 export type Friend = {
@@ -21,7 +23,8 @@ function isFriend(value: unknown): value is Friend {
 }
 
 export async function fetchFriends(signal?: AbortSignal): Promise<Friend[]> {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
+  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
+  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
   const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends`, {
     method: 'GET',
     credentials: 'include',
