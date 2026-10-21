@@ -219,12 +219,12 @@ function validateSearchOptions(input) {
   if (!input || typeof input !== 'object') {
     throw new Error('Invalid mod search options.');
   }
-  const { source, query, gameVersion, loader } = input;
+  const { source, query = '', gameVersion, loader } = input;
   if (!['modrinth', 'curseforge'].includes(source)) {
     throw new Error('Choose Modrinth or CurseForge.');
   }
-  if (typeof query !== 'string' || query.trim().length < 2 || query.trim().length > 100) {
-    throw new Error('Search terms must be between 2 and 100 characters.');
+  if (typeof query !== 'string' || query.trim().length > 100) {
+    throw new Error('Search terms must be under 100 characters.');
   }
   if (typeof gameVersion !== 'string' || !/^\d+\.\d+(?:\.\d+)?$/.test(gameVersion)) {
     throw new Error('Choose a valid Minecraft version.');
@@ -275,9 +275,12 @@ async function searchModrinth(options) {
     [`categories:${modrinthLoaderFacets[options.loader]}`],
   ];
   const url = new URL('https://api.modrinth.com/v2/search');
-  url.searchParams.set('query', options.query);
+  if (options.query) {
+    url.searchParams.set('query', options.query);
+  }
   url.searchParams.set('facets', JSON.stringify(facets));
-  url.searchParams.set('limit', '20');
+  url.searchParams.set('index', options.query ? 'relevance' : 'downloads');
+  url.searchParams.set('limit', '25');
   const response = await fetch(url, {
     headers: { 'User-Agent': 'BayonClient/1.0.0 (launcher mod search)' },
     signal: AbortSignal.timeout(15000),
@@ -318,7 +321,7 @@ let modsConfigPath = null;
 
 function getModsDir() {
   if (!modsDir) {
-    modsDir = path.join(app.getPath('userData'), 'mods');
+    modsDir = path.join(app.getPath('appData'), 'Bayon Client', 'minecraft', 'mods');
     if (!existsSync(modsDir)) {
       mkdirSync(modsDir, { recursive: true });
     }

@@ -1378,8 +1378,12 @@ input[type='range'] {
     height: 36px;
   }
 
-  .mod-project-button {
+  .mod-result > div:last-child {
     grid-column: 2;
+    align-items: flex-start !important;
+  }
+
+  .mod-project-button {
     justify-self: start;
   }
 }

@@ -160,7 +160,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         </div>
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select edition-select" onClick={() => setEditionOpen(!editionOpen)}>
-            <span className="edition-cube">▧</span>
+            <span className="edition-cube">â–§</span>
             <span className="title-select-copy"><strong>Minecraft</strong><small>Java Edition</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
@@ -168,7 +168,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         </div>
         <div className="title-dropdown-wrap">
           <button type="button" onClick={() => setNotificationOpen(!notificationOpen)} className="window-control" aria-label="Notifications"><Bell className="h-4 w-4" /></button>
-          {notificationOpen && <div className="title-popover notification-popover"><strong>Notifications</strong><span>You’re all caught up.</span></div>}
+          {notificationOpen && <div className="title-popover notification-popover"><strong>Notifications</strong><span>Youâ€™re all caught up.</span></div>}
         </div>
         <div className="window-controls">
           <button type="button" onClick={() => data?.minimize?.()} className="window-control" aria-label="Minimize"><Minus className="h-4 w-4" /></button>
@@ -258,7 +258,7 @@ function HomePage() {
     if (launching) return;
     setLaunching(true);
     setLaunchProgress(5);
-    setLaunchStatus('Initialising launch…');
+    setLaunchStatus('Initialising launchâ€¦');
     void window.electronAPI?.updateDiscordActivity({
       state: `Launching ${selectedLoader} ${selectedVersion}`,
       version: selectedVersion,
@@ -315,7 +315,7 @@ function HomePage() {
               {loaderMenu && <div className="hero-dropdown loader-dropdown">{['Vanilla', 'Forge', 'Fabric', 'Quilt'].map((loader) => <button type="button" key={loader} onClick={() => { setSelectedLoader(loader); setLoaderMenu(false); }}>{loader}</button>)}</div>}
             </div>
             <div className="hero-status">
-              <span>{launchStatus === 'Ready' ? 'Ready to prepare — launching the game is not connected.' : launchStatus}</span>
+              <span>{launchStatus === 'Ready' ? 'Ready to prepare â€” launching the game is not connected.' : launchStatus}</span>
               <button type="button" onClick={() => navigate('/play')}>Launch settings <ChevronRight className="h-3 w-3" /></button>
             </div>
             {launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
@@ -325,7 +325,7 @@ function HomePage() {
 
         <div className="quick-settings">
           <div className="quick-setting">
-            <span className="quick-setting-icon minecraft-grass">▧</span>
+            <span className="quick-setting-icon minecraft-grass">â–§</span>
             <div><small>Minecraft Version</small><strong>{selectedVersion}</strong></div>
             <select aria-label="Minecraft version" value={selectedVersion} onChange={(event) => setSelectedVersion(event.target.value)}>{['1.21.10', '1.21.1', '1.20.6', '1.19.4'].map((version) => <option key={version}>{version}</option>)}</select>
             <ChevronDown className="quick-chevron h-4 w-4" />
@@ -337,7 +337,7 @@ function HomePage() {
             {profileMenu && <div className="hero-dropdown profile-dropdown"><button type="button" onClick={() => setProfileMenu(false)}>Default profile</button><button type="button" onClick={() => { setProfileMenu(false); navigate('/profiles'); }}>Manage profiles</button></div>}
           </div>
           <div className="quick-setting loader-setting">
-            <div className="quick-setting-icon loader-puzzle">✦</div>
+            <div className="quick-setting-icon loader-puzzle">âœ¦</div>
             <div><small>{selectedLoader}</small><strong>Mod Loader</strong></div>
             <ChevronDown className="quick-chevron h-4 w-4" />
           </div>
@@ -345,7 +345,7 @@ function HomePage() {
         </div>
 
         <section className="news-section">
-          <div className="section-heading"><h2><span className="news-icon">▤</span> Latest News</h2><button type="button" onClick={() => setNewsFilter(newsFilter === 'All' ? 'Updates' : 'All')}>View {newsFilter === 'All' ? 'All' : 'Updates'} <ChevronRight className="h-3.5 w-3.5" /></button></div>
+          <div className="section-heading"><h2><span className="news-icon">â–¤</span> Latest News</h2><button type="button" onClick={() => setNewsFilter(newsFilter === 'All' ? 'Updates' : 'All')}>View {newsFilter === 'All' ? 'All' : 'Updates'} <ChevronRight className="h-3.5 w-3.5" /></button></div>
           <div className="news-grid">
             <article className="news-card news-world">
               <div className="news-art"><span>UPDATE</span></div>
@@ -367,7 +367,7 @@ function HomePage() {
         <section className="rail-panel servers-panel">
           <div className="rail-heading"><h2>Partner Servers</h2></div>
           {serversState.loading ? (
-            <div className="rail-empty-state"><strong>Loading servers…</strong><span>Fetching live partner directory.</span></div>
+            <div className="rail-empty-state"><strong>Loading serversâ€¦</strong><span>Fetching live partner directory.</span></div>
           ) : serversState.error ? (
             <div className="rail-empty-state">
               <strong>Servers unavailable</strong>
@@ -378,7 +378,7 @@ function HomePage() {
             <div className="rail-empty-state"><strong>No servers listed</strong><span>Partner servers will appear here.</span></div>
           ) : (
             serversState.servers.map((server) => (
-              <div className="server-row" key={server.id} title={`${server.name} — ${server.address}`}>
+              <div className="server-row" key={server.id} title={`${server.name} â€” ${server.address}`}>
                 <div className={`server-icon ${server.color || 'server-blue'}`}>
                   {server.icon && (server.icon.startsWith('data:') || server.icon.startsWith('http')) ? (
                     <img src={server.icon} alt={server.name} className="h-full w-full rounded-md object-contain" />
@@ -388,7 +388,7 @@ function HomePage() {
                 </div>
                 <div className="server-copy">
                   <strong>{server.name}</strong>
-                  <small>{server.flag ? `${server.flag} • ${server.address}` : server.address}</small>
+                  <small>{server.flag ? `${server.flag} â€¢ ${server.address}` : server.address}</small>
                 </div>
                 <div className="server-count">
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -432,7 +432,7 @@ function HomePage() {
               <div className="flex items-center gap-1">
                 <input
                   type="text"
-                  placeholder="Minecraft username…"
+                  placeholder="Minecraft usernameâ€¦"
                   value={friendSearchInput}
                   onChange={(e) => {
                     setFriendSearchInput(e.target.value);
@@ -446,7 +446,7 @@ function HomePage() {
                   disabled={friendAdding || !friendSearchInput.trim()}
                   className="rounded bg-white px-2 py-1 text-[10px] font-semibold text-black hover:bg-white/90 disabled:opacity-40"
                 >
-                  {friendAdding ? '…' : 'Add'}
+                  {friendAdding ? 'â€¦' : 'Add'}
                 </button>
               </div>
               {friendAddError && <span className="text-[9px] text-red-400">{friendAddError}</span>}
@@ -454,7 +454,7 @@ function HomePage() {
           )}
 
           {friendsState.loading ? (
-            <div className="rail-empty-state"><strong>Loading friends…</strong><span>Checking the local friends service.</span></div>
+            <div className="rail-empty-state"><strong>Loading friendsâ€¦</strong><span>Checking the local friends service.</span></div>
           ) : friendsState.error ? (
             <div className="rail-empty-state">
               <strong>Friends service unavailable</strong>
@@ -481,7 +481,7 @@ function HomePage() {
                   className="ml-auto opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 text-xs px-1 transition"
                   title="Remove friend"
                 >
-                  ×
+                  Ã—
                 </button>
               </div>
             ))
@@ -546,7 +546,7 @@ function DiscordPresenceCard() {
             : status.state === 'connected'
             ? 'Activity is active'
             : status.state === 'connecting'
-            ? 'Connecting to Discord…'
+            ? 'Connecting to Discordâ€¦'
             : status.state === 'discord-not-running'
             ? 'Discord is not connected'
             : status.state === 'error'
@@ -609,7 +609,7 @@ function AccountsPage() {
             <div className="account-list">{accounts.map((account) => (
               <div className="account-row" key={account.id}>
                 <div className="avatar-large">{account.username.slice(0, 1).toUpperCase()}</div>
-                <div className="account-row-copy"><strong>{account.username}</strong><small>Offline profile · created {new Date(account.createdAt).toLocaleDateString()}</small></div>
+                <div className="account-row-copy"><strong>{account.username}</strong><small>Offline profile Â· created {new Date(account.createdAt).toLocaleDateString()}</small></div>
                 {activeAccountId === account.id ? <span className="account-active-badge">Active</span> : <button type="button" className="account-select-button" onClick={() => selectAccount(account.id)}>Use account</button>}
                 <button type="button" className="account-remove-button" onClick={() => setConfirmRemove(account.id)} aria-label={`Remove ${account.username}`}>Remove</button>
               </div>
@@ -623,7 +623,7 @@ function AccountsPage() {
             <p>This creates a local launcher profile only. It does not sign in to Microsoft or Minecraft services.</p>
             <label htmlFor="offline-username">Minecraft username</label>
             <input id="offline-username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" placeholder="YourPlayerName" />
-            <small>3–16 letters, numbers, or underscores.</small>
+            <small>3â€“16 letters, numbers, or underscores.</small>
             {error && <p className="mod-catalog-error" role="alert">{error}</p>}
             <div className="offline-form-actions"><button type="button" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit">Create account</button></div>
           </form>
@@ -655,7 +655,7 @@ function PlayPage() {
     if (launching) return;
     setLaunching(true);
     setProgress(5);
-    setStatus('Initialising launch…');
+    setStatus('Initialising launchâ€¦');
 
     const unsubscribe = window.electronAPI?.onLaunchProgress?.((data) => {
       setProgress(data.progress);
@@ -933,18 +933,12 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
       .catch((cause: unknown) => setKeyStatusError(cause instanceof Error ? cause.message : 'Could not check CurseForge API key status.'));
   }, []);
 
-  const search = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (query.trim().length < 2) {
-      setError('Enter at least 2 characters to search.');
-      setResults([]);
-      return;
-    }
+  const performSearch = async (targetQuery: string) => {
     setLoading(true);
     setError('');
     setSearched(true);
     try {
-      const matches = await searchModCatalog({ source, query: query.trim(), gameVersion, loader });
+      const matches = await searchModCatalog({ source, query: targetQuery.trim(), gameVersion, loader });
       setResults(matches);
     } catch (cause) {
       setResults([]);
@@ -953,6 +947,15 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
       setLoading(false);
     }
   };
+
+  const search = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void performSearch(query);
+  };
+
+  useEffect(() => {
+    void performSearch(query);
+  }, [source, gameVersion, loader]);
 
   const installMod = async (result: ModCatalogResult) => {
     if (!window.electronAPI?.installModrinthMod) return;
@@ -1004,13 +1007,13 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
           <div className="mod-search-filters">
             <label><span>Version</span><select value={gameVersion} onChange={(event) => setGameVersion(event.target.value)}>{['1.21.1', '1.20.6', '1.19.4', '1.18.2', '1.17.1'].map((version) => <option key={version}>{version}</option>)}</select></label>
             <label><span>Loader</span><select value={loader} onChange={(event) => setLoader(event.target.value)}>{['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((value) => <option key={value}>{value}</option>)}</select></label>
-            <button type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
+            <button type="submit" disabled={loading}>{loading ? 'Searchingâ€¦' : 'Search'}</button>
           </div>
         </form>
         {error && <p className="mod-catalog-error" role="alert">{error}</p>}
         {openError && <p className="mod-catalog-error" role="alert">{openError}</p>}
         <div className="mod-catalog-results" aria-live="polite">
-          {loading && <div className="mod-catalog-empty">Searching {source === 'modrinth' ? 'Modrinth' : 'CurseForge'}…</div>}
+          {loading && <div className="mod-catalog-empty">Searching {source === 'modrinth' ? 'Modrinth' : 'CurseForge'}â€¦</div>}
           {!loading && results.map((result) => {
             const isInstalled = installedMods.some((m) => m.id === result.id || m.name.toLowerCase() === result.name.toLowerCase());
             return (
@@ -1029,12 +1032,12 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
                       disabled={isInstalled || installingIds[result.id]}
                       onClick={() => void installMod(result)}
                       className={[
-                        'rounded-xl px-4 py-2 text-xs font-semibold tracking-wide transition',
+                        'rounded-xl px-4 py-2 text-xs font-semibold tracking-wide transition shadow-sm',
                         isInstalled
-                          ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 cursor-default'
+                          ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300 cursor-default'
                           : installingIds[result.id]
                           ? 'border border-white/20 bg-white/10 text-white/60 cursor-wait'
-                          : 'border border-white/30 bg-white text-black hover:bg-white/90',
+                          : 'border border-white/40 bg-white text-black hover:bg-white/90 active:scale-95',
                       ].join(' ')}
                     >
                       {isInstalled ? 'Installed ✓' : installingIds[result.id] ? 'Installing…' : 'Install Mod'}
@@ -1076,7 +1079,7 @@ function SkinsPage() {
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
       if (image.width !== 64 || (image.height !== 64 && image.height !== 32)) {
-        setUploadError('Minecraft skin images must be 64 × 64 or legacy 64 × 32 PNGs.');
+        setUploadError('Minecraft skin images must be 64 Ã— 64 or legacy 64 Ã— 32 PNGs.');
         return;
       }
 
@@ -1124,7 +1127,7 @@ function SkinsPage() {
               </div>
             </div>
             <div className="skin-preview-stage">
-              <Suspense fallback={<div className="skin-preview-loading">Loading 3D skin preview…</div>}>
+              <Suspense fallback={<div className="skin-preview-loading">Loading 3D skin previewâ€¦</div>}>
                 <SkinModelPreview imageUrl={activeSkin.imageUrl} skinName={activeSkin.name} rotation={rotation} slimArms={armModel === 'Slim'} onRotationChange={setRotation} />
               </Suspense>
             </div>
@@ -1207,7 +1210,7 @@ function SettingsPage() {
             <SettingRow label="Discord Rich Presence"><Toggle checked={settings.discordPresence} onChange={handleToggleDiscordPresence} /></SettingRow>
             <div>
               <Label>Language</Label>
-              <Select value={settings.language} onChange={settings.setLanguage} options={['English (US)', 'English (UK)', 'Deutsch', 'Español']} />
+              <Select value={settings.language} onChange={settings.setLanguage} options={['English (US)', 'English (UK)', 'Deutsch', 'EspaÃ±ol']} />
             </div>
             <div>
               <Label>Default version</Label>
