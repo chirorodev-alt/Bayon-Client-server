@@ -24,11 +24,12 @@
     "flag": "SMP"
   },
   {
-    "id": "pvpland",
-    "name": "PvP Land",
-    "address": "pvp.land",
+    "id": "mazerclub",
+    "name": "Mazer Club",
+    "address": "mazerclub.net",
     "icon": "P",
     "color": "server-red",
-    "flag": "Practice"
+    "flag": "Economy"
   }
 ]
+
