@@ -1,0 +1,61 @@
+{
+  "name": "bayon-client",
+  "productName": "Bayon Client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on tcp:5173 && node electron/run.js .\"",
+    "start": "node electron/run.js . --prod",
+    "dev:renderer": "vite --host localhost --strictPort",
+    "electron": "node electron/run.js .",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "lint": "oxlint .",
+    "preview": "vite preview",
+    "server": "node server/src/index.js",
+    "server:dev": "node --watch server/src/index.js"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "discord-rpc": "^4.0.1",
+    "framer-motion": "^14.5.0",
+    "lucide-react": "^1.61.0",
+    "minecraft-launcher-core": "^3.18.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4",
+    "tailwindcss": "^4.3.3",
+    "three": "^0.186.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3",
+    "oxlint": "^1.88.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "latest",
+    "wait-on": "^9.5.1"
+  },
+  "build": {
+    "appId": "com.bayon.client",
+    "productName": "Bayon Client",
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "icon": "public/bayon-icon.ico"
+    },
+    "linux": {
+      "icon": "public/bayon-icon.png"
+    }
+  }
+}

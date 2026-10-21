@@ -1,0 +1,60 @@
+{
+  "projectType": "electron",
+  "devServer": {
+    "command": "npm",
+    "args": [
+      "run",
+      "dev:renderer"
+    ],
+    "url": "http://localhost:5173",
+    "readyTimeoutSeconds": 120
+  },
+  "setup": [
+    {
+      "command": "npm",
+      "args": [
+        "ci"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "assertions": [
+    {
+      "name": "electron-builds",
+      "kind": "process",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "tests-pass",
+      "kind": "process",
+      "command": "npm",
+      "args": [
+        "test"
+      ],
+      "verificationMethod": "test-results",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "electron-smoke-headless-exits-zero",
+      "kind": "process",
+      "command": "npx",
+      "args": [
+        "electron",
+        ".",
+        "--no-sandbox",
+        "--smoke-test"
+      ],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 60
+    }
+  ]
+}

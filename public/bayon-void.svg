@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="500" y1="0" x2="500" y2="500" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29103C"/>
+      <stop offset=".5" stop-color="#521B75"/>
+      <stop offset="1" stop-color="#100D1B"/>
+    </linearGradient>
+    <radialGradient id="portal" cx="0" cy="0" r="1" gradientTransform="matrix(0 258 -222 0 535 238)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D879FF" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#8A2AD0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#bg)" d="M0 0h1000v500H0z"/>
+  <path fill="url(#portal)" d="M0 0h1000v500H0z"/>
+  <path fill="#140D20" d="m0 58 92 31 44 77 93 33 23 79 97 22 18 101-97 99H0V58Zm1000 0-93 31-41 77-94 33-23 79-97 22-18 101 97 99h269V58Z"/>
+  <path fill="#2E1442" d="m0 111 76 28 40 67 81 20 37 79 76 24 54 84-50 87H0V111Zm1000 0-77 28-40 67-80 20-39 79-73 24-55 84 51 87h313V111Z"/>
+  <path fill="#461B63" d="m0 176 95 23 31 74 91 26 30 67 89 20 38 89-56 25H0V176Zm1000 0-95 23-31 74-91 26-30 67-89 20-38 89 56 25h318V176Z"/>
+  <path fill="#B746F0" fill-opacity=".32" d="M492 102h16v258h-16zM437 151h16v198h-16zm110-13h15v198h-15z"/>
+  <path fill="#0B0C11" d="M464 293h7v87h-7zm65 0h7v87h-7zm-49-78h38v72h-38z"/>
+  <path fill="#DBB5F2" fill-opacity=".55" d="M195 91h35v18h-35zm-95 226h46v19h-46zm695-181h55v20h-55zm-124 221h44v18h-44zM293 144h29v15h-29zm438 42h32v18h-32z"/>
+</svg>
