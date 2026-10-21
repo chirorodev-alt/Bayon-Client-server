@@ -37,6 +37,7 @@ import { searchModCatalog, type ModCatalogResult, type ModCatalogSource } from '
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import type { DiscordPresenceStatus, InstalledMod } from './types/electron';
+import bayonIcon from './assets/bayon-icon.png';
 
 const SkinModelPreview = lazy(() => import('./components/SkinModelPreview').then((module) => ({ default: module.SkinModelPreview })));
 
@@ -73,7 +74,44 @@ const skinGallery: SkinItem[] = [
   { id: 4, name: 'Ashen', type: 'Custom', accent: 'from-white to-neutral-400' },
 ];
 
-const versions = ['1.21.1', '1.20.6', '1.19.4', '1.18.2', '1.17.1'];
+const versions = [
+  '1.21.4',
+  '1.21.3',
+  '1.21.2',
+  '1.21.1',
+  '1.21',
+  '1.20.6',
+  '1.20.5',
+  '1.20.4',
+  '1.20.3',
+  '1.20.2',
+  '1.20.1',
+  '1.20',
+  '1.19.4',
+  '1.19.3',
+  '1.19.2',
+  '1.19.1',
+  '1.19',
+  '1.18.2',
+  '1.18.1',
+  '1.18',
+  '1.17.1',
+  '1.17',
+  '1.16.5',
+  '1.16.4',
+  '1.16.3',
+  '1.16.2',
+  '1.16.1',
+  '1.16',
+  '1.15.2',
+  '1.15.1',
+  '1.15',
+  '1.14.4',
+  '1.14.3',
+  '1.14.2',
+  '1.14.1',
+  '1.14',
+];
 
 function App() {
   return (
@@ -327,7 +365,7 @@ function HomePage() {
           <div className="quick-setting">
             <span className="quick-setting-icon minecraft-grass">â–§</span>
             <div><small>Minecraft Version</small><strong>{selectedVersion}</strong></div>
-            <select aria-label="Minecraft version" value={selectedVersion} onChange={(event) => setSelectedVersion(event.target.value)}>{['1.21.10', '1.21.1', '1.20.6', '1.19.4'].map((version) => <option key={version}>{version}</option>)}</select>
+            <select aria-label="Minecraft version" value={selectedVersion} onChange={(event) => setSelectedVersion(event.target.value)}>{versions.map((version) => <option key={version}>{version}</option>)}</select>
             <ChevronDown className="quick-chevron h-4 w-4" />
           </div>
           <div className="quick-setting profile-setting">
@@ -381,9 +419,21 @@ function HomePage() {
               <div className="server-row" key={server.id} title={`${server.name} â€” ${server.address}`}>
                 <div className={`server-icon ${server.color || 'server-blue'}`}>
                   {server.icon && (server.icon.startsWith('data:') || server.icon.startsWith('http')) ? (
-                    <img src={server.icon} alt={server.name} className="h-full w-full rounded-md object-contain" />
+                    <img
+                      src={server.icon}
+                      alt={server.name}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(server.address)}`;
+                      }}
+                    />
                   ) : (
-                    server.icon || server.name.charAt(0)
+                    <img
+                      src={`https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(server.address)}`}
+                      alt={server.name}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                      }}
+                    />
                   )}
                 </div>
                 <div className="server-copy">
@@ -1005,7 +1055,7 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search mods (e.g. Sodium, Iris, Lithium)" autoFocus />
           </label>
           <div className="mod-search-filters">
-            <label><span>Version</span><select value={gameVersion} onChange={(event) => setGameVersion(event.target.value)}>{['1.21.1', '1.20.6', '1.19.4', '1.18.2', '1.17.1'].map((version) => <option key={version}>{version}</option>)}</select></label>
+            <label><span>Version</span><select value={gameVersion} onChange={(event) => setGameVersion(event.target.value)}>{versions.map((version) => <option key={version}>{version}</option>)}</select></label>
             <label><span>Loader</span><select value={loader} onChange={(event) => setLoader(event.target.value)}>{['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((value) => <option key={value}>{value}</option>)}</select></label>
             <button type="submit" disabled={loading}>{loading ? 'Searchingâ€¦' : 'Search'}</button>
           </div>
@@ -1368,7 +1418,7 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 }
 
 function LogoMark() {
-  return <img className="bayon-logo" src="/bayon-icon.png" alt="Bayon Client logo" draggable={false} />;
+  return <img className="bayon-logo" src={bayonIcon} alt="Bayon Client logo" draggable={false} />;
 }
 
 function RefreshIcon() {

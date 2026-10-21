@@ -4,6 +4,7 @@
     "name": "Mazer Club",
     "address": "mazerclub.net",
     "flag": "Partner",
-    "color": "server-blue"
+    "color": "server-blue",
+    "icon": "https://eu.mc-api.net/v3/server/favicon/mazerclub.net"
   }
 ]
