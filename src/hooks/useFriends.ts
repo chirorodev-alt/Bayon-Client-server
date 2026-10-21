@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchFriends, type Friend } from '../services/friendsApi';
+import { fetchFriends, addFriend as apiAddFriend, removeFriend as apiRemoveFriend, type Friend } from '../services/friendsApi';
 
 type FriendsState = {
   friends: Friend[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  addFriend: (username: string) => Promise<Friend>;
+  removeFriend: (id: string) => Promise<void>;
 };
 
 export function useFriends(): FriendsState {
@@ -15,11 +17,27 @@ export function useFriends(): FriendsState {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = useCallback(() => setRefreshToken((value) => value + 1), []);
 
+  const addFriend = useCallback(async (username: string) => {
+    const newFriend = await apiAddFriend(username);
+    setFriends((prev) => {
+      const idx = prev.findIndex((f) => f.username.toLowerCase() === newFriend.username.toLowerCase());
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = newFriend;
+        return next;
+      }
+      return [...prev, newFriend];
+    });
+    return newFriend;
+  }, []);
+
+  const removeFriend = useCallback(async (id: string) => {
+    await apiRemoveFriend(id);
+    setFriends((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-
     fetchFriends(controller.signal)
       .then((items) => {
         setFriends(items);
@@ -35,5 +53,5 @@ export function useFriends(): FriendsState {
     return () => controller.abort();
   }, [refreshToken]);
 
-  return { friends, loading, error, refresh };
+  return { friends, loading, error, refresh, addFriend, removeFriend };
 }

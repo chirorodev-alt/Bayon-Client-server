@@ -1,34 +1,4 @@
 {
-  "users": [
-    {
-      "id": "demo-user-1",
-      "username": "Alex",
-      "passwordHash": "",
-      "status": "online",
-      "avatarUrl": "https://mc-heads.net/avatar/Alex",
-      "createdAt": "2026-10-21T14:28:23.745Z"
-    },
-    {
-      "id": "demo-user-2",
-      "username": "Steve",
-      "passwordHash": "",
-      "status": "in_game",
-      "avatarUrl": "https://mc-heads.net/avatar/Steve",
-      "createdAt": "2026-10-21T14:28:23.746Z"
-    }
-  ],
-  "friends": [
-    {
-      "id": "1",
-      "username": "Alex",
-      "status": "online",
-      "avatarUrl": "https://mc-heads.net/avatar/Alex"
-    },
-    {
-      "id": "2",
-      "username": "Steve",
-      "status": "in_game",
-      "avatarUrl": "https://mc-heads.net/avatar/Steve"
-    }
-  ]
+  "users": [],
+  "friends": []
 }

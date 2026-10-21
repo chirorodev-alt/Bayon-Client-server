@@ -1,35 +1,9 @@
 [
   {
-    "id": "hypixel",
-    "name": "Hypixel",
-    "address": "mc.hypixel.net",
-    "icon": "H",
-    "color": "server-yellow",
-    "flag": "Featured"
-  },
-  {
-    "id": "cubecraft",
-    "name": "CubeCraft",
-    "address": "play.cubecraft.net",
-    "icon": "C",
-    "color": "server-blue",
-    "flag": "Partner"
-  },
-  {
-    "id": "manacube",
-    "name": "ManaCube",
-    "address": "play.manacube.com",
-    "icon": "M",
-    "color": "server-pink",
-    "flag": "SMP"
-  },
-  {
     "id": "mazerclub",
     "name": "Mazer Club",
     "address": "mazerclub.net",
-    "icon": "P",
-    "color": "server-red",
-    "flag": "Economy"
+    "flag": "Partner",
+    "color": "server-blue"
   }
 ]
-

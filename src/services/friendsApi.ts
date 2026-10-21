@@ -43,3 +43,47 @@ export async function fetchFriends(signal?: AbortSignal): Promise<Friend[]> {
 
   return payload.friends;
 }
+
+export async function addFriend(username: string): Promise<Friend> {
+  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
+  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      username: username.trim(),
+      status: 'offline',
+      avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(username.trim())}`,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(errorData.error || `Failed to add friend (HTTP ${response.status}).`);
+  }
+
+  const data = (await response.json()) as { friend?: unknown };
+  if (data?.friend && isFriend(data.friend)) {
+    return data.friend;
+  }
+  throw new Error('Invalid response from friends service.');
+}
+
+export async function removeFriend(id: string): Promise<void> {
+  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
+  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to remove friend (HTTP ${response.status}).`);
+  }
+}
+

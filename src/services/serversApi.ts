@@ -34,3 +34,4 @@ export async function fetchPartnerServers(signal?: AbortSignal): Promise<Partner
   }
   return [];
 }
+

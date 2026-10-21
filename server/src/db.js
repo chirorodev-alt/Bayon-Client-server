@@ -7,28 +7,8 @@ const dataDir = path.join(__dirname, '..', 'data');
 const dbFile = path.join(dataDir, 'db.json');
 
 const initialData = {
-  users: [
-    {
-      id: 'demo-user-1',
-      username: 'Alex',
-      passwordHash: '',
-      status: 'online',
-      avatarUrl: 'https://mc-heads.net/avatar/Alex',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'demo-user-2',
-      username: 'Steve',
-      passwordHash: '',
-      status: 'in_game',
-      avatarUrl: 'https://mc-heads.net/avatar/Steve',
-      createdAt: new Date().toISOString(),
-    },
-  ],
-  friends: [
-    { id: '1', username: 'Alex', status: 'online', avatarUrl: 'https://mc-heads.net/avatar/Alex' },
-    { id: '2', username: 'Steve', status: 'in_game', avatarUrl: 'https://mc-heads.net/avatar/Steve' },
-  ],
+  users: [],
+  friends: [],
 };
 
 function ensureDir() {

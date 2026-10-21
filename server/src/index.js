@@ -298,28 +298,51 @@ function fetchServerPing(address) {
           const maxPlayers = parsed.players?.max ?? 0;
           const formattedCount = onlinePlayers >= 1000 ? `${(onlinePlayers / 1000).toFixed(1)}k` : `${onlinePlayers}`;
 
+          const icon = parsed.icon || `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(address)}`;
           const result = {
             online,
             onlinePlayers,
             maxPlayers,
             formattedCount,
             motd: parsed.motd?.clean?.[0] || '',
+            icon,
           };
           pingCache.set(address, { timestamp: Date.now(), data: result });
           resolve(result);
         } catch {
-          resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+          resolve({
+            online: false,
+            onlinePlayers: 0,
+            maxPlayers: 0,
+            formattedCount: '0',
+            motd: '',
+            icon: `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(address)}`,
+          });
         }
       });
     });
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+      resolve({
+        online: false,
+        onlinePlayers: 0,
+        maxPlayers: 0,
+        formattedCount: '0',
+        motd: '',
+        icon: `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(address)}`,
+      });
     });
 
     req.on('error', () => {
-      resolve({ online: false, onlinePlayers: 0, maxPlayers: 0, formattedCount: '0', motd: '' });
+      resolve({
+        online: false,
+        onlinePlayers: 0,
+        maxPlayers: 0,
+        formattedCount: '0',
+        motd: '',
+        icon: `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(address)}`,
+      });
     });
   });
 }

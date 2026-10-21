@@ -232,7 +232,28 @@ function HomePage() {
   const [launchStatus, setLaunchStatus] = useState('Ready');
   const [launching, setLaunching] = useState(false);
   const [newsFilter, setNewsFilter] = useState('All');
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [friendSearchInput, setFriendSearchInput] = useState('');
+  const [friendAdding, setFriendAdding] = useState(false);
+  const [friendAddError, setFriendAddError] = useState<string | null>(null);
   const settings = useSettingsStore();
+
+  const handleAddFriendSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = friendSearchInput.trim();
+    if (!name) return;
+    setFriendAdding(true);
+    setFriendAddError(null);
+    try {
+      await friendsState.addFriend(name);
+      setFriendSearchInput('');
+      setShowAddFriend(false);
+    } catch (err) {
+      setFriendAddError(err instanceof Error ? err.message : 'Failed to add friend.');
+    } finally {
+      setFriendAdding(false);
+    }
+  };
   const startLaunchProcess = async () => {
     if (launching) return;
     setLaunching(true);
@@ -359,7 +380,11 @@ function HomePage() {
             serversState.servers.map((server) => (
               <div className="server-row" key={server.id} title={`${server.name} — ${server.address}`}>
                 <div className={`server-icon ${server.color || 'server-blue'}`}>
-                  {server.icon || server.name.charAt(0)}
+                  {server.icon && (server.icon.startsWith('data:') || server.icon.startsWith('http')) ? (
+                    <img src={server.icon} alt={server.name} className="h-full w-full rounded-md object-contain" />
+                  ) : (
+                    server.icon || server.name.charAt(0)
+                  )}
                 </div>
                 <div className="server-copy">
                   <strong>{server.name}</strong>
@@ -382,7 +407,52 @@ function HomePage() {
           )}
         </section>
         <section className="rail-panel friends-panel">
-          <div className="rail-heading"><h2><UsersRound className="h-3.5 w-3.5" /> Friends</h2><button type="button" onClick={() => navigate('/accounts')}>View All <ChevronRight className="h-3 w-3" /></button></div>
+          <div className="rail-heading">
+            <h2><UsersRound className="h-3.5 w-3.5" /> Friends</h2>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddFriend((v) => !v);
+                  setFriendAddError(null);
+                }}
+                className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-white/70 hover:border-white/25 hover:text-white"
+                title="Add friend"
+              >
+                {showAddFriend ? 'Cancel' : '+ Add'}
+              </button>
+              <button type="button" onClick={() => navigate('/accounts')}>
+                View All <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+
+          {showAddFriend && (
+            <form onSubmit={handleAddFriendSubmit} className="mb-2 flex flex-col gap-1.5 rounded-lg border border-white/10 bg-[#121a24] p-2">
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="Minecraft username…"
+                  value={friendSearchInput}
+                  onChange={(e) => {
+                    setFriendSearchInput(e.target.value);
+                    setFriendAddError(null);
+                  }}
+                  className="w-full rounded border border-white/15 bg-[#0d141b] px-2 py-1 text-[11px] text-white outline-none focus:border-white/40"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={friendAdding || !friendSearchInput.trim()}
+                  className="rounded bg-white px-2 py-1 text-[10px] font-semibold text-black hover:bg-white/90 disabled:opacity-40"
+                >
+                  {friendAdding ? '…' : 'Add'}
+                </button>
+              </div>
+              {friendAddError && <span className="text-[9px] text-red-400">{friendAddError}</span>}
+            </form>
+          )}
+
           {friendsState.loading ? (
             <div className="rail-empty-state"><strong>Loading friends…</strong><span>Checking the local friends service.</span></div>
           ) : friendsState.error ? (
@@ -395,13 +465,27 @@ function HomePage() {
               </div>
             </div>
           ) : friendsState.friends.length === 0 ? (
-            <div className="rail-empty-state"><strong>No friends returned</strong><span>The connected service has no friends to display.</span></div>
-          ) : friendsState.friends.slice(0, 5).map((friend) => (
-            <div className="friend-row" key={friend.id}>
-              {friend.avatarUrl ? <img className="friend-avatar" src={friend.avatarUrl} alt="" /> : <div className="friend-avatar">{friend.username.slice(0, 1).toUpperCase()}</div>}
-              <div className="friend-copy"><strong>{friend.username}</strong><small className={friend.status !== 'offline' ? 'friend-online' : ''}><i />{friend.status === 'in_game' ? 'In Game' : friend.status === 'online' ? 'Online' : 'Offline'}</small></div>
+            <div className="rail-empty-state">
+              <strong>No friends yet</strong>
+              <span>Add friends with the search button above.</span>
+              <button type="button" onClick={() => setShowAddFriend(true)}>+ Add Friend</button>
             </div>
-          ))}
+          ) : (
+            friendsState.friends.slice(0, 5).map((friend) => (
+              <div className="friend-row group relative" key={friend.id}>
+                {friend.avatarUrl ? <img className="friend-avatar" src={friend.avatarUrl} alt="" /> : <div className="friend-avatar">{friend.username.slice(0, 1).toUpperCase()}</div>}
+                <div className="friend-copy"><strong>{friend.username}</strong><small className={friend.status !== 'offline' ? 'friend-online' : ''}><i />{friend.status === 'in_game' ? 'In Game' : friend.status === 'online' ? 'Online' : 'Offline'}</small></div>
+                <button
+                  type="button"
+                  onClick={() => void friendsState.removeFriend(friend.id)}
+                  className="ml-auto opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 text-xs px-1 transition"
+                  title="Remove friend"
+                >
+                  ×
+                </button>
+              </div>
+            ))
+          )}
         </section>
       </aside>
     </motion.div>
