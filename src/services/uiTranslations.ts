@@ -56,7 +56,17 @@ const khmerText: Record<string, string> = {
   'Servers unavailable': 'ម៉ាស៊ីនបម្រើមិនអាចប្រើបាន', 'Set as active profile': 'កំណត់ជាប្រូហ្វាល់សកម្ម', 'Skin preview': 'មើលស្បែកជាមុន',
   'Snapshot': 'កំណែសាកល្បង', 'The latest update brings new features, bug fixes and performance improvements.': 'បច្ចុប្បន្នភាពថ្មីមានមុខងារថ្មី ជួសជុលបញ្ហា និងបង្កើនល្បឿន។',
   'Use account': 'ប្រើគណនី', 'Use automatic': 'ប្រើស្វ័យប្រវត្តិ', 'Use detected': 'ប្រើ Java ដែលរកឃើញ', 'Use on Home': 'ប្រើនៅទំព័រដើម', 'Version': 'កំណែ', 'Your balance': 'សមតុល្យរបស់អ្នក',
-  'Your Microsoft identity is used to sync Bacoins with the website.': 'គណនី Microsoft របស់អ្នកត្រូវបានប្រើដើម្បីធ្វើសមកាលកម្ម Bacoins ជាមួយគេហទំព័រ។',
+  'Your Microsoft identity is used to sync Bacoins with the website.': 'គណនី Microsoft របស់អ្នកត្រូវបានប្រើដើម្បីធ្វើសមកាលកម្ម Bacoins ជាមួយគេហទំព័រ។', 'Build': 'បង្កើត',
+  'Choose your own Java executable instead of the automatically selected managed runtime.': 'ជ្រើសរើសឯកសារ Java ផ្ទាល់ខ្លួន ជំនួសឱ្យ Java ដែលបានជ្រើសរើសដោយស្វ័យប្រវត្តិ។',
+  'FPS, keystrokes, CPS, coordinates, ping, direction, armor and effects · Minecraft 26.2 · Fabric': 'FPS, គ្រាប់ចុច, CPS, កូអរដោនេ, ភីង, ទិសដៅ, គ្រឿងការពារ និងឥទ្ធិពល · Minecraft 26.2 · Fabric',
+  'Game data directory:': 'ថតទិន្នន័យហ្គេម៖', 'If no world is selected, move the downloaded pack into a world’s datapacks folder to use it.': 'បើមិនបានជ្រើសរើសពិភពទេ សូមផ្លាស់ទីកញ្ចប់ទៅថត datapacks របស់ពិភពដើម្បីប្រើវា។',
+  'Java': 'Java', 'Later': 'ពេលក្រោយ',
+  'Loading 3D skin preview…': 'កំពុងផ្ទុកការមើលស្បែក 3D…',
+  'Minecraft 1.21.10 Released!': 'Minecraft 1.21.10 បានចេញហើយ!', 'Oct 4, 2025': '៤ តុលា ២០២៥', 'Oct 6, 2025': '៦ តុលា ២០២៥', 'Recommended': 'ណែនាំ',
+  'Remove local profiles, saves, downloaded game files, managed Java runtimes, and launcher preferences.': 'លុបប្រូហ្វាល់ក្នុងម៉ាស៊ីន ពិភពហ្គេម ឯកសារហ្គេម Java និងការកំណត់កម្មវិធីបើក។',
+  'This creates a local launcher profile only. It does not sign in to Microsoft or Minecraft services.': 'វាបង្កើតតែប្រូហ្វាល់ក្នុងម៉ាស៊ីនប៉ុណ្ណោះ។ វាមិនចូល Microsoft ឬសេវា Minecraft ទេ។',
+  'This only removes the local profile from Bayon Client. This action cannot be undone.': 'វាលុបតែប្រូហ្វាល់ក្នុងម៉ាស៊ីនចេញពី Bayon Client ប៉ុណ្ណោះ។ មិនអាចត្រឡប់វិញបានទេ។',
+  'User Settings ? Activity Privacy ? Share your activity status': 'ការកំណត់អ្នកប្រើ ? ឯកជនភាពសកម្មភាព ? ចែករំលែកស្ថានភាពសកម្មភាព',
 };
 
 const translatedText = new WeakMap<Text, string>();
