@@ -10,6 +10,7 @@ const initialData = {
   users: [],
   friends: [],
   clientNotifications: [],
+  clientFeedback: [],
   redeemCodes: [],
   cosmetics: [],
   adminBacoinsAdjustments: [],
@@ -33,6 +34,7 @@ export function loadDb() {
     data.users ??= [];
     data.friends ??= [];
     data.clientNotifications ??= [];
+    data.clientFeedback ??= [];
     data.redeemCodes ??= [];
     data.cosmetics ??= [];
     delete data.betaPairingCodes;
@@ -50,8 +52,9 @@ export function saveDb(data) {
     const tempFile = `${dbFile}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
     fs.renameSync(tempFile, dbFile);
+    return true;
   } catch (err) {
     console.error('Failed to persist db file:', err);
+    return false;
   }
 }
-

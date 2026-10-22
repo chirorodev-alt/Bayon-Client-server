@@ -2,7 +2,7 @@
   "name": "bayon-client",
   "productName": "Bayon Client",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.1.6",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -52,6 +52,8 @@
   "build": {
     "appId": "com.bayon.client",
     "productName": "Bayon Client",
+    "asar": true,
+    "afterPack": "build/hide-runtime-files.cjs",
     "publish": [
       {
         "provider": "generic",
@@ -97,6 +99,7 @@
     },
     "nsis": {
       "artifactName": "Bayon-Client-Setup-${version}.${ext}",
+      "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

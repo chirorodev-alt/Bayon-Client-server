@@ -130,6 +130,8 @@ declare global {
       minimize: () => void;
       maximize: () => void;
       close: () => void;
+      setLaunchOnStartup: (enabled: boolean) => Promise<void>;
+      setMinimizeToTray: (enabled: boolean) => Promise<void>;
       onWindowStateChange: (callback: (state: 'maximized' | 'restored') => void) => void;
       searchMods: (options: ModSearchOptions) => Promise<ModCatalogResult[]>;
       getMinecraftVersions: () => Promise<string[]>;

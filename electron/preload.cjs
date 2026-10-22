@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  setLaunchOnStartup: (enabled) => ipcRenderer.invoke('settings:set-launch-on-startup', enabled),
+  setMinimizeToTray: (enabled) => ipcRenderer.invoke('settings:set-minimize-to-tray', enabled),
   onWindowStateChange: (callback) => {
     ipcRenderer.on('window:state-change', (_event, state) => callback(state));
   },

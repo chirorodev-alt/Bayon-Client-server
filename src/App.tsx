@@ -21,6 +21,7 @@ import {
   KeyRound,
   Layers3,
   Mail,
+  MessageSquarePlus,
   Minus,
   Monitor,
   MoreHorizontal,
@@ -43,7 +44,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useFriends } from './hooks/useFriends';
@@ -61,6 +62,33 @@ import { localizeApp } from './services/uiTranslations';
 const SkinModelPreview = lazy(() => import('./components/SkinModelPreview').then((module) => ({ default: module.SkinModelPreview })));
 
 type WindowState = 'maximized' | 'restored';
+type ClientNotification = { id: string; title: string; message: string; createdAt: string; level: 'info' | 'success' | 'warning' };
+
+const NOTIFICATION_CACHE_KEY = 'bayon-client-notifications-v1';
+const NOTIFICATION_READ_KEY = 'bayon-client-read-notifications-v1';
+const NOTIFICATION_DISMISSED_KEY = 'bayon-client-dismissed-notifications-v1';
+
+function loadDismissedNotificationIds(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTIFICATION_DISMISSED_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch { return []; }
+}
+
+function loadStoredNotifications(): ClientNotification[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTIFICATION_CACHE_KEY) || '[]');
+    const dismissed = new Set(loadDismissedNotificationIds());
+    return Array.isArray(parsed) ? parsed.filter((item): item is ClientNotification => item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.message === 'string' && !dismissed.has(item.id)) : [];
+  } catch { return []; }
+}
+
+function loadReadNotificationIds(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTIFICATION_READ_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch { return []; }
+}
 
 type NavItem = {
   to: string;
@@ -154,8 +182,11 @@ function AppShell() {
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: 'idle' });
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [startupSettingsError, setStartupSettingsError] = useState<string | null>(null);
   const location = useLocation();
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
+  const launchOnStartup = useSettingsStore((state) => state.launchOnStartup);
+  const minimizeToTray = useSettingsStore((state) => state.minimizeToTray);
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const discordPresence = useSettingsStore((state) => state.discordPresence);
 
@@ -164,9 +195,19 @@ function AppShell() {
     if (!root) return;
     const applyTranslations = () => localizeApp(root, language);
     applyTranslations();
-    const observer = new MutationObserver(applyTranslations);
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        applyTranslations();
+      });
+    });
     observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['aria-label', 'title', 'placeholder'] });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [language]);
 
   useEffect(() => {
@@ -181,6 +222,21 @@ function AppShell() {
     api.getAppUpdateState().then(setAppUpdate).catch(() => {});
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+    let active = true;
+    Promise.all([
+      api.setLaunchOnStartup(launchOnStartup),
+      api.setMinimizeToTray(minimizeToTray),
+    ]).then(() => {
+      if (active) setStartupSettingsError(null);
+    }).catch((cause: unknown) => {
+      if (active) setStartupSettingsError(cause instanceof Error ? cause.message : 'Could not apply startup and tray settings.');
+    });
+    return () => { active = false; };
+  }, [launchOnStartup, minimizeToTray]);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -221,7 +277,7 @@ function AppShell() {
                 <Route path="/play" element={<PlayPage />} />
                 <Route path="/mods" element={<ModsPage />} />
                 <Route path="/skins" element={<SkinsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings" element={<SettingsPage startupSettingsError={startupSettingsError} />} />
                 <Route path="/profiles" element={<ProfilesPage />} />
                 <Route path="/accounts" element={<AccountsPage />} />
                 <Route path="/store" element={<StorePage />} />
@@ -253,12 +309,23 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [editionOpen, setEditionOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [betaBusy, setBetaBusy] = useState(false);
   const [betaNotice, setBetaNotice] = useState('');
   const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
   const [onlineUsers, setOnlineUsers] = useState<number | null>(null);
-  const [clientNotifications, setClientNotifications] = useState<{ id: string; title: string; message: string; createdAt: string; level: string }[]>([]);
+  const [clientNotifications, setClientNotifications] = useState<ClientNotification[]>(loadStoredNotifications);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(loadReadNotificationIds);
+  const [activeAnnouncement, setActiveAnnouncement] = useState<ClientNotification | null>(() => {
+    const cached = loadStoredNotifications();
+    const read = new Set(loadReadNotificationIds());
+    return cached.find((item) => !read.has(item.id)) ?? null;
+  });
+  const knownNotificationIds = useRef(new Set(clientNotifications.map((item) => item.id)));
+  const readNotificationIdsRef = useRef(new Set(readNotificationIds));
+  const dismissedNotificationIds = useRef(new Set(loadDismissedNotificationIds()));
+  const shownAnnouncementIds = useRef(new Set(activeAnnouncement ? [activeAnnouncement.id] : []));
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   const setLanguage = useSettingsStore((state) => state.setLanguage);
@@ -288,18 +355,68 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
 
   useEffect(() => {
     let stopped = false;
+    let requestInFlight = false;
     const refreshNotifications = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 20_000);
       try {
-        const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications`);
+        const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications`, { cache: 'no-store', signal: controller.signal });
         if (!response.ok) return;
-        const result = await response.json() as { notifications?: typeof clientNotifications };
-        if (!stopped) setClientNotifications(result.notifications ?? []);
-      } catch { /* Keep the menu usable while offline. */ }
+        const result = await response.json() as { notifications?: ClientNotification[] };
+        if (stopped) return;
+        const incoming = Array.isArray(result.notifications) ? result.notifications.filter((item) => item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.message === 'string') : [];
+        const newUnread = incoming.find((item) => !knownNotificationIds.current.has(item.id) && !readNotificationIdsRef.current.has(item.id));
+        const serverIds = new Set(incoming.map((item) => item.id));
+        const next = incoming.filter((item) => !dismissedNotificationIds.current.has(item.id)).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 100);
+        knownNotificationIds.current = serverIds;
+        const retainedDismissed = [...dismissedNotificationIds.current].filter((id) => serverIds.has(id));
+        dismissedNotificationIds.current = new Set(retainedDismissed);
+        try { localStorage.setItem(NOTIFICATION_DISMISSED_KEY, JSON.stringify(retainedDismissed)); } catch { /* Keep dismissals in memory for this session. */ }
+        setClientNotifications(next);
+        try { localStorage.setItem(NOTIFICATION_CACHE_KEY, JSON.stringify(next)); } catch { /* The live list still works if storage is unavailable. */ }
+        setReadNotificationIds((current) => {
+          const retained = current.filter((id) => serverIds.has(id));
+          readNotificationIdsRef.current = new Set(retained);
+          try { localStorage.setItem(NOTIFICATION_READ_KEY, JSON.stringify(retained)); } catch { /* The session remains usable if storage is unavailable. */ }
+          return retained;
+        });
+        setActiveAnnouncement((current) => current && !serverIds.has(current.id) ? null : current);
+        if (newUnread && !shownAnnouncementIds.current.has(newUnread.id)) {
+          shownAnnouncementIds.current.add(newUnread.id);
+          setActiveAnnouncement(newUnread);
+        }
+      } catch { /* Keep cached notices available while offline or the server wakes. */ }
+      finally { window.clearTimeout(timeout); requestInFlight = false; }
     };
     void refreshNotifications();
-    const interval = window.setInterval(() => void refreshNotifications(), 60_000);
+    const interval = window.setInterval(() => void refreshNotifications(), 5_000);
     return () => { stopped = true; window.clearInterval(interval); };
   }, []);
+
+  const markNotificationsRead = () => {
+    const next = [...new Set([...readNotificationIdsRef.current, ...clientNotifications.map((item) => item.id)])];
+    readNotificationIdsRef.current = new Set(next);
+    setReadNotificationIds(next);
+    try { localStorage.setItem(NOTIFICATION_READ_KEY, JSON.stringify(next)); } catch { /* The current session remains marked read in memory. */ }
+    setActiveAnnouncement(null);
+  };
+
+  const dismissNotification = (id: string) => {
+    const nextDismissed = new Set(dismissedNotificationIds.current);
+    nextDismissed.add(id);
+    dismissedNotificationIds.current = nextDismissed;
+    try { localStorage.setItem(NOTIFICATION_DISMISSED_KEY, JSON.stringify([...nextDismissed])); } catch { /* Keep the dismissal for this session. */ }
+    const nextNotifications = clientNotifications.filter((item) => item.id !== id);
+    setClientNotifications(nextNotifications);
+    try { localStorage.setItem(NOTIFICATION_CACHE_KEY, JSON.stringify(nextNotifications)); } catch { /* The visible list still updates. */ }
+    const nextRead = [...new Set([...readNotificationIdsRef.current, id])];
+    readNotificationIdsRef.current = new Set(nextRead);
+    setReadNotificationIds(nextRead);
+    try { localStorage.setItem(NOTIFICATION_READ_KEY, JSON.stringify(nextRead)); } catch { /* Keep read state for this session. */ }
+    setActiveAnnouncement((current) => current?.id === id ? null : current);
+  };
 
   useEffect(() => {
     const refreshIdentity = () => {
@@ -325,7 +442,10 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
     finally { setBetaBusy(false); }
   };
 
+  const unreadNotificationCount = clientNotifications.reduce((count, item) => count + (readNotificationIds.includes(item.id) ? 0 : 1), 0);
+
   return (
+    <>
     <div className="title-bar">
       <div className="title-brand">
         <LogoMark />
@@ -381,9 +501,15 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
           </div>}
         </div>
         <div className="title-dropdown-wrap">
-          <button type="button" onClick={() => setNotificationOpen(!notificationOpen)} className="window-control" aria-label="Notifications"><Bell className="h-4 w-4" /></button>
-          {notificationOpen && <div className="title-popover notification-popover"><strong>{language === 'Khmer' ? 'ការជូនដំណឹង' : 'Notifications'}</strong>{clientNotifications.length ? clientNotifications.map((item) => <article className="client-notification-item" key={item.id}><strong>{item.title}</strong><span>{item.message}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>) : <span>{language === 'Khmer' ? 'មិនមានការជូនដំណឹងថ្មីទេ។' : 'You’re all caught up.'}</span>}</div>}
+          <button type="button" onClick={() => { const opening = !notificationOpen; setNotificationOpen(opening); if (opening) markNotificationsRead(); }} className={`window-control notification-trigger ${unreadNotificationCount ? 'has-unread' : ''}`} aria-label={unreadNotificationCount ? `Notifications, ${unreadNotificationCount} unread` : 'Notifications'} aria-expanded={notificationOpen}>
+            <Bell className="h-4 w-4" />{unreadNotificationCount > 0 && <span className="notification-unread-dot" aria-label="Unread notifications" />}
+          </button>
+          {notificationOpen && <div className="title-popover notification-popover" role="region" aria-label="Notifications">
+            <strong>{language === 'Khmer' ? 'ការជូនដំណឹង' : 'Notifications'}{unreadNotificationCount > 0 && <span className="notification-unread-count">{unreadNotificationCount} new</span>}</strong>
+            {clientNotifications.length ? clientNotifications.map((item) => <article className={`client-notification-item notification-level-${item.level} ${readNotificationIds.includes(item.id) ? '' : 'is-unread'}`} key={item.id}><div className="client-notification-heading"><strong>{item.title}</strong><button type="button" className="client-notification-delete" onClick={() => dismissNotification(item.id)} aria-label={`Delete notification: ${item.title}`}><Trash2 className="h-3 w-3" /><span>Delete</span></button></div><span>{item.message}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>) : <span>{language === 'Khmer' ? 'មិនមានការជូនដំណឹងថ្មីទេ។' : 'You’re all caught up.'}</span>}
+          </div>}
         </div>
+        <button type="button" className="window-control feedback-trigger" onClick={() => setFeedbackOpen(true)} aria-label="Send feedback" title="Send feedback"><MessageSquarePlus className="h-4 w-4" /><span>Feedback</span></button>
         <div className="window-controls">
           <button type="button" onClick={() => data?.minimize?.()} className="window-control" aria-label="Minimize"><Minus className="h-4 w-4" /></button>
           <button type="button" onClick={() => data?.maximize?.()} className="window-control" aria-label={windowState === 'maximized' ? 'Restore' : 'Maximize'}>{windowState === 'maximized' ? <Square className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}</button>
@@ -391,13 +517,27 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         </div>
       </div>
     </div>
+    {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
+    {activeAnnouncement && <Modal title={activeAnnouncement.level === 'warning' ? 'Important announcement' : 'New Bayon announcement'} onClose={() => setActiveAnnouncement(null)} className={`notification-announcement-modal notification-level-${activeAnnouncement.level}`}>
+      <div className="notification-announcement-content">
+        <span className="notification-announcement-kicker"><Bell className="h-4 w-4" /> BAYON CLIENT NOTICE</span>
+        <h2>{activeAnnouncement.title}</h2>
+        <p>{activeAnnouncement.message}</p>
+        <small>{new Date(activeAnnouncement.createdAt).toLocaleString()}</small>
+        <div className="notification-announcement-actions">
+          <button type="button" onClick={() => setActiveAnnouncement(null)}>Dismiss</button>
+          <button type="button" className="notification-center-button" onClick={() => { markNotificationsRead(); setNotificationOpen(true); }}>Open notifications</button>
+        </div>
+      </div>
+    </Modal>}
+    </>
   );
 }
 
 function Sidebar() {
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
-  const [appVersion, setAppVersion] = useState('1.0.2');
+  const [appVersion, setAppVersion] = useState('1.1.5');
   useEffect(() => { void window.electronAPI?.getAppVersion().then(setAppVersion).catch(() => {}); }, []);
   return (
     <aside className="sidebar">
@@ -451,12 +591,38 @@ function HomePage() {
   const [launchProgress, setLaunchProgress] = useState(0);
   const [launchStatus, setLaunchStatus] = useState('Ready');
   const [launching, setLaunching] = useState(false);
-  const [newsFilter, setNewsFilter] = useState('All');
+  const [showAllNews, setShowAllNews] = useState(false);
+  const [clientNews, setClientNews] = useState<ClientNotification[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [newsError, setNewsError] = useState<string | null>(null);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendSearchInput, setFriendSearchInput] = useState('');
   const [friendAdding, setFriendAdding] = useState(false);
   const [friendAddError, setFriendAddError] = useState<string | null>(null);
   const settings = useSettingsStore();
+
+  const refreshNews = useCallback(async () => {
+    try {
+      const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`News service returned HTTP ${response.status}.`);
+      const result = await response.json() as { notifications?: ClientNotification[] };
+      const items = Array.isArray(result.notifications) ? result.notifications.filter((item) =>
+        item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.message === 'string' && typeof item.createdAt === 'string',
+      ) : [];
+      setClientNews(items);
+      setNewsError(null);
+    } catch (cause) {
+      setNewsError(cause instanceof Error ? cause.message : 'Could not load the latest news.');
+    } finally {
+      setNewsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void Promise.resolve().then(refreshNews);
+    const interval = window.setInterval(() => void refreshNews(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshNews]);
 
   const handleAddFriendSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -573,16 +739,18 @@ function HomePage() {
         </div>
 
         <section className="news-section">
-          <div className="section-heading"><h2><span className="news-icon">â–¤</span> Latest News</h2><button type="button" onClick={() => setNewsFilter(newsFilter === 'All' ? 'Updates' : 'All')}>View {newsFilter === 'All' ? 'All' : 'Updates'} <ChevronRight className="h-3.5 w-3.5" /></button></div>
+          <div className="section-heading"><h2><span className="news-icon"><Bell className="h-3 w-3" /></span> Latest News</h2><button type="button" onClick={() => setShowAllNews((current) => !current)}>{showAllNews ? 'Show Less' : 'View All'} <ChevronRight className="h-3.5 w-3.5" /></button></div>
           <div className="news-grid">
-            <article className="news-card news-world">
-              <div className="news-art"><span>UPDATE</span></div>
-              <div className="news-copy"><h3>Minecraft 1.21.10 Released!</h3><p>The latest update brings new features, bug fixes and performance improvements.</p><footer><span>Oct 6, 2025</span><i /> <span>12.4k views</span><ChevronRight className="ml-auto h-4 w-4" /></footer></div>
-            </article>
-            <article className="news-card news-void">
-              <div className="news-art"><span>NEWS</span></div>
-              <div className="news-copy"><h3>Bayon Client v1.0.0 Is Here!</h3><p>A brand new launcher experience with better performance and more features.</p><footer><span>Oct 4, 2025</span><i /> <span>8.7k views</span><ChevronRight className="ml-auto h-4 w-4" /></footer></div>
-            </article>
+            {clientNews.slice(0, showAllNews ? 6 : 2).map((item, index) => (
+              <article className={`news-card ${index % 2 === 0 ? 'news-world' : 'news-void'}`} key={item.id}>
+                <div className="news-art"><span>{item.level === 'warning' ? 'IMPORTANT' : item.level === 'success' ? 'UPDATE' : 'NEWS'}</span></div>
+                <div className="news-copy"><h3>{item.title}</h3><p>{item.message}</p><footer><span>{new Date(item.createdAt).toLocaleDateString()}</span><i /> <span>Bayon Client</span></footer></div>
+              </article>
+            ))}
+            {!clientNews.length && <div className="news-empty-state" role={newsError ? 'alert' : 'status'}>
+              <span>{newsError || (newsLoading ? 'Loading the latest news…' : 'No news yet. Check back for updates from Bayon.')}</span>
+              {newsError && <button type="button" onClick={() => void refreshNews()}>Retry</button>}
+            </div>}
           </div>
         </section>
       </section>
@@ -1711,7 +1879,7 @@ function DiscordPresenceSettings({ enabled, onEnabledChange }: { enabled: boolea
   </section>;
 }
 
-function SettingsPage() {
+function SettingsPage({ startupSettingsError }: { startupSettingsError: string | null }) {
   const availableVersions = useMinecraftVersions();
   const settings = useSettingsStore();
   const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
@@ -1827,6 +1995,8 @@ function SettingsPage() {
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <SettingRow label="Launch on startup" icon={Radio}><Toggle checked={settings.launchOnStartup} onChange={settings.setLaunchOnStartup} /></SettingRow>
             <SettingRow label="Minimize to tray" icon={Minus}><Toggle checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} /></SettingRow>
+            <p className="md:col-span-2 text-[10px] leading-relaxed text-white/45">When startup is enabled, Bayon opens hidden in the system tray after you sign in. With minimize-to-tray enabled, minimizing or closing the window keeps Bayon running; choose Quit from the tray menu to exit.</p>
+            {startupSettingsError && <p className="md:col-span-2 text-[10px] text-rose-300" role="alert">{startupSettingsError}</p>}
             <DiscordPresenceSettings enabled={settings.discordPresence} onEnabledChange={settings.setDiscordPresence} />
             <div>
               <SettingLabel icon={Globe}>Language</SettingLabel>
@@ -2043,6 +2213,101 @@ function MinecraftAvatar({ username, skin, className }: { username: string; skin
       </svg>
     </span>
   );
+}
+
+function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const [category, setCategory] = useState<'bug' | 'positive'>('bug');
+  const [message, setMessage] = useState('');
+  const [image, setImage] = useState<File | null>(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const submitFeedback = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const imageData = image ? await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read the selected image.'));
+        reader.onload = () => {
+          if (typeof reader.result !== 'string') {
+            reject(new Error('Could not read the selected image.'));
+            return;
+          }
+          resolve(reader.result.slice(reader.result.indexOf(',') + 1));
+        };
+        reader.readAsDataURL(image);
+      }) : undefined;
+      const response = await fetch(`${BACKEND_BASE_URL}/api/client-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          category,
+          message: message.trim(),
+          ...(image && imageData ? { image: { mimeType: image.type, data: imageData } } : {}),
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || `Feedback service returned HTTP ${response.status}.`);
+      setSuccess('Your feedback was sent to the Bayon team. Thank you!');
+      setMessage('');
+      setImage(null);
+      setCategory('bug');
+      formRef.current?.reset();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not send your feedback.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const selectImage = (file: File | undefined) => {
+    setError(null);
+    setImage(null);
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setError('Choose a PNG, JPEG, or WebP image.');
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setError('The image must be 3 MB or smaller.');
+      return;
+    }
+    setImage(file);
+  };
+
+  return <Modal title="Send feedback" onClose={onClose}>
+    <form ref={formRef} onSubmit={(event) => void submitFeedback(event)} className="feedback-form">
+      <p className="feedback-help">Report a bug or send the team a positive note. Your message and optional image will be shared with Bayon administrators.</p>
+      <label className="feedback-field">What would you like to send?
+        <select value={category} onChange={(event) => setCategory(event.target.value as 'bug' | 'positive')}>
+          <option value="bug">Report a bug</option>
+          <option value="positive">Good news / appreciation</option>
+        </select>
+      </label>
+      <label className="feedback-field">Your message
+        <textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={2000} rows={5} required placeholder="Tell us what happened or what you like…" />
+      </label>
+      <label className="feedback-field">Attach a screenshot (optional)
+        <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.currentTarget.files?.[0])} />
+        <small>PNG, JPEG, or WebP · up to 3 MB. Please remove passwords and private information from screenshots.</small>
+      </label>
+      {image && <p className="feedback-file-name"><FileImage className="h-4 w-4" /> {image.name} · {(image.size / 1024).toFixed(0)} KB</p>}
+      {error && <p className="feedback-error" role="alert">{error}</p>}
+      {success && <p className="feedback-success" role="status">{success}</p>}
+      <div className="feedback-actions">
+        <button type="button" onClick={onClose} disabled={sending}>Cancel</button>
+        <button type="submit" disabled={sending || !message.trim()}>{sending ? 'Sending…' : 'Send feedback'}</button>
+      </div>
+    </form>
+  </Modal>;
 }
 
 function Modal({ title, children, onClose, className = '' }: { title: string; children: React.ReactNode; onClose: () => void; className?: string }) {

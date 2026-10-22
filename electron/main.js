@@ -9,12 +9,15 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray } = require('electron');
 const DiscordRPC = require('discord-rpc');
 const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let consoleWindow = null;
+let tray = null;
+let minimizeToTray = false;
+const launchInBackground = process.argv.includes('--hidden');
 const gameConsoleBuffer = [];
 let nextConsoleLogId = 1;
 let appUpdateState = { status: 'idle' };
@@ -1062,6 +1065,27 @@ async function installManagedJavaRuntime(major) {
   }
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, '..', 'public', process.platform === 'win32' ? 'bayon-icon.ico' : 'bayon-icon.png');
+  tray = new Tray(iconPath);
+  tray.setToolTip('Bayon Client');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Bayon Client', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Quit Bayon Client', click: () => { appQuitting = true; app.quit(); } },
+  ]));
+  tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+}
+
 function sendWindowState() {
   if (!mainWindow) {
     return;
@@ -1185,12 +1209,17 @@ function setupAutoUpdater() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1500,
-    height: 920,
-    minWidth: 1200,
-    minHeight: 760,
+    width: 1280,
+    height: 800,
+    minWidth: 1100,
+    minHeight: 680,
     frame: false,
-    backgroundColor: '#080808',
+    // Bayon paints an opaque full-window CSS background. Marking the native
+    // surface transparent prevents Chromium from requesting its automatic
+    // DWM system backdrop on unsupported Windows builds.
+    transparent: true,
+    backgroundColor: '#00000000',
+    show: !launchInBackground,
     titleBarStyle: 'hiddenInset',
     titleBarOverlay: false,
     autoHideMenuBar: true,
@@ -1216,8 +1245,14 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    mainWindow.focus();
+    if (!launchInBackground) showMainWindow();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (minimizeToTray && !appQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
   });
 
   mainWindow.on('maximize', sendWindowState);
@@ -1237,6 +1272,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  createTray();
   loadConfiguredDirectories();
   discordConfigPath = path.join(app.getPath('userData'), 'discord-presence.json');
 
@@ -1799,7 +1835,9 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('window:minimize', () => {
-    if (mainWindow) mainWindow.minimize();
+    if (!mainWindow) return;
+    if (minimizeToTray) mainWindow.hide();
+    else mainWindow.minimize();
   });
 
   ipcMain.on('window:maximize', () => {
@@ -1818,6 +1856,21 @@ app.whenReady().then(() => {
     if (mainWindow) mainWindow.close();
   });
 
+  ipcMain.handle('settings:set-launch-on-startup', (event, enabled) => {
+    assertTrustedRenderer(event);
+    if (typeof enabled !== 'boolean') throw new Error('Launch-on-startup setting must be a boolean.');
+    if (!['win32', 'darwin'].includes(process.platform)) {
+      throw new Error('Launch on startup is supported on Windows and macOS.');
+    }
+    app.setLoginItemSettings({ openAtLogin: enabled, args: enabled ? ['--hidden'] : [] });
+  });
+
+  ipcMain.handle('settings:set-minimize-to-tray', (event, enabled) => {
+    assertTrustedRenderer(event);
+    if (typeof enabled !== 'boolean') throw new Error('Minimize-to-tray setting must be a boolean.');
+    minimizeToTray = enabled;
+  });
+
   createWindow();
   setupAutoUpdater();
   app.on('activate', () => {
@@ -1833,6 +1886,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   appQuitting = true;
+  tray?.destroy();
+  tray = null;
   if (discordReconnectTimer) clearTimeout(discordReconnectTimer);
   discordReconnectTimer = null;
 });

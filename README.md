@@ -4,7 +4,7 @@ Bayon Client is a premium monochrome Minecraft launcher concept built with React
 
 ## Features
 
-- Custom frameless Electron window with real minimize/maximize/close behavior
+- Compact frameless Electron window with rounded corners, tray controls, and real minimize/maximize behavior
 - Fixed sidebar navigation with page routing
 - Home, Play, Mods, Skins, and Settings screens
 - Dark gaming UI with white-glow premium styling
@@ -13,6 +13,8 @@ Bayon Client is a premium monochrome Minecraft launcher concept built with React
 - Local offline-account creation, selection, and removal
 - Live mod catalog search through Modrinth and optional CurseForge APIs
 - Discord Rich Presence for Bayon Client activity
+- Optional background launch at sign-in and minimize-to-tray behavior
+- In-client feedback form for bug reports or positive notes, with optional screenshot upload
 - Friends panel integration with a local authenticated backend API
 - No fabricated partner-server listings or friend presence
 - Fixed application viewport; long pages scroll within their own content area
@@ -55,7 +57,9 @@ The Friends panel requests `GET {VITE_API_BASE_URL}/api/friends` and includes sa
 
 `status` must be `online`, `offline`, or `in_game`; `avatarUrl` is optional. The UI displays a connection/response error rather than sample entries if the API is unavailable or returns an invalid response. For cookie authentication, configure the local API to allow credentialed requests from the Vite/Electron origin. Configure the hosted API base URL through the build environment when deploying.
 
-Partner servers remain on the Home page only; listings stay disconnected until a real directory endpoint is provided. No fake player counts or sample friend identities are shown.
+Partner servers on the Home page come from the backend directory and show live server status. Administrators can add, edit, and remove partner listings from the private admin panel. Latest News is populated by admin-published client notifications; new posts also appear in the client's notification center.
+
+Use the feedback button in the client title bar to send a bug report or positive feedback to the Bayon team. You may attach one PNG, JPEG, or WebP screenshot up to 3 MB. Feedback is visible only in the authenticated admin panel's Feedback inbox.
 
 ## Discord Rich Presence
 

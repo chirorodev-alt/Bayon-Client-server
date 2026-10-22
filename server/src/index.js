@@ -16,6 +16,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serversFile = path.join(__dirname, '..', 'data', 'servers.json');
+const clientFeedbackDirectory = path.join(__dirname, '..', 'data', 'client-feedback');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -40,7 +41,12 @@ app.use(express.json({ limit: '18mb' }));
 // Load in-memory DB state with file sync
 let db = loadDb();
 const clientHeartbeats = new Map();
+const clientFeedbackSubmissions = new Map();
 const CLIENT_HEARTBEAT_TTL_MS = 90_000;
+const CLIENT_FEEDBACK_WINDOW_MS = 60 * 60 * 1000;
+const CLIENT_FEEDBACK_MAX_PER_WINDOW = 5;
+const CLIENT_FEEDBACK_IMAGE_MAX_SIZE = 3 * 1024 * 1024;
+fs.mkdirSync(clientFeedbackDirectory, { recursive: true });
 
 function pruneClientHeartbeats(now = Date.now()) {
   for (const [clientId, lastSeen] of clientHeartbeats) {
@@ -67,6 +73,71 @@ app.get('/api/client-notifications', (_req, res) => {
   const notifications = (db.clientNotifications || []).slice(-30).reverse();
   res.setHeader('Cache-Control', 'no-store');
   res.json({ notifications });
+});
+
+app.post('/api/client-feedback', (req, res) => {
+  const now = Date.now();
+  if (clientFeedbackSubmissions.size > 1000) {
+    for (const [ip, timestamps] of clientFeedbackSubmissions) {
+      if (!timestamps.some((createdAt) => now - createdAt < CLIENT_FEEDBACK_WINDOW_MS)) clientFeedbackSubmissions.delete(ip);
+    }
+  }
+  const recentSubmissions = (clientFeedbackSubmissions.get(req.ip) || []).filter((createdAt) => now - createdAt < CLIENT_FEEDBACK_WINDOW_MS);
+  if (recentSubmissions.length >= CLIENT_FEEDBACK_MAX_PER_WINDOW) {
+    return res.status(429).json({ error: 'Feedback limit reached. Please try again later.' });
+  }
+
+  const category = req.body?.category;
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  if (!['bug', 'positive'].includes(category)) return res.status(400).json({ error: 'Choose a bug report or positive feedback category.' });
+  if (!message || message.length > 2000) return res.status(400).json({ error: 'Write a message of up to 2,000 characters.' });
+
+  let imageBuffer = null;
+  let imageMimeType = '';
+  let imageExtension = '';
+  if (req.body?.image !== undefined && req.body.image !== null) {
+    const image = req.body.image;
+    const allowedImageTypes = new Map([['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/webp', 'webp']]);
+    if (!image || typeof image.data !== 'string' || !allowedImageTypes.has(image.mimeType)) {
+      return res.status(400).json({ error: 'Attach a PNG, JPEG, or WebP image.' });
+    }
+    if (image.data.length > Math.ceil(CLIENT_FEEDBACK_IMAGE_MAX_SIZE * 4 / 3) + 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(image.data)) {
+      return res.status(400).json({ error: 'Image data is invalid or larger than 3 MB.' });
+    }
+    imageBuffer = Buffer.from(image.data, 'base64');
+    if (!imageBuffer.length || imageBuffer.length > CLIENT_FEEDBACK_IMAGE_MAX_SIZE || imageBuffer.toString('base64') !== image.data) {
+      return res.status(400).json({ error: 'Image data is invalid or larger than 3 MB.' });
+    }
+    imageMimeType = image.mimeType;
+    imageExtension = allowedImageTypes.get(imageMimeType);
+    const validSignature = imageMimeType === 'image/png'
+      ? imageBuffer.length >= 8 && imageBuffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      : imageMimeType === 'image/jpeg'
+        ? imageBuffer.length >= 3 && imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8 && imageBuffer[2] === 0xff
+        : imageBuffer.length >= 12 && imageBuffer.toString('ascii', 0, 4) === 'RIFF' && imageBuffer.toString('ascii', 8, 12) === 'WEBP';
+    if (!validSignature) return res.status(400).json({ error: 'The attached file does not match its image type.' });
+  }
+
+  const id = crypto.randomUUID();
+  const imageFileName = imageBuffer ? `${id}.${imageExtension}` : null;
+  const feedback = { id, category, message, createdAt: new Date(now).toISOString(), status: 'new', imageFileName, imageMimeType: imageMimeType || null };
+  try {
+    if (imageBuffer) fs.writeFileSync(path.join(clientFeedbackDirectory, imageFileName), imageBuffer, { flag: 'wx' });
+    db.clientFeedback ??= [];
+    db.clientFeedback.push(feedback);
+    if (!saveDb(db)) throw new Error('Could not save the feedback entry.');
+    recentSubmissions.push(now);
+    clientFeedbackSubmissions.set(req.ip, recentSubmissions);
+    res.status(201).json({ success: true, feedbackId: id });
+  } catch (error) {
+    db.clientFeedback = (db.clientFeedback || []).filter((item) => item.id !== id);
+    if (imageFileName) {
+      try { fs.rmSync(path.join(clientFeedbackDirectory, imageFileName), { force: true }); }
+      catch (cleanupError) { console.error('Could not clean up an incomplete feedback image:', cleanupError); }
+    }
+    console.error('Failed saving client feedback:', error);
+    res.status(500).json({ error: 'Could not save your feedback. Please try again later.' });
+  }
 });
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
@@ -654,6 +725,82 @@ app.post('/api/admin/client-notifications', requireAdmin, (req, res) => {
   res.status(201).json({ notification });
 });
 
+app.get('/api/admin/client-notifications', requireAdmin, (_req, res) => {
+  const notifications = [...(db.clientNotifications || [])].reverse();
+  res.set('Cache-Control', 'no-store');
+  res.json({ notifications });
+});
+
+app.delete('/api/admin/client-notifications/:notificationId', requireAdmin, (req, res) => {
+  const notificationId = String(req.params.notificationId || '');
+  db.clientNotifications ??= [];
+  const previousCount = db.clientNotifications.length;
+  db.clientNotifications = db.clientNotifications.filter((item) => item.id !== notificationId);
+  if (db.clientNotifications.length === previousCount) {
+    return res.status(404).json({ error: 'Notification not found.' });
+  }
+  saveDb(db);
+  res.json({ success: true });
+});
+
+app.get('/api/admin/client-feedback', requireAdmin, (_req, res) => {
+  const feedback = [...(db.clientFeedback || [])].reverse().map(({ imageFileName, imageMimeType, ...item }) => ({
+    ...item,
+    hasImage: Boolean(imageFileName && imageMimeType),
+  }));
+  res.set('Cache-Control', 'no-store');
+  res.json({ feedback });
+});
+
+app.get('/api/admin/client-feedback/:feedbackId/image', requireAdmin, (req, res) => {
+  const item = (db.clientFeedback || []).find((feedback) => feedback.id === req.params.feedbackId);
+  if (!item?.imageFileName || !['image/png', 'image/jpeg', 'image/webp'].includes(item.imageMimeType)) {
+    return res.status(404).json({ error: 'Feedback image not found.' });
+  }
+  const fileName = path.basename(item.imageFileName);
+  if (fileName !== item.imageFileName) return res.status(404).json({ error: 'Feedback image not found.' });
+  const imagePath = path.join(clientFeedbackDirectory, fileName);
+  if (!fs.existsSync(imagePath)) return res.status(404).json({ error: 'Feedback image is no longer available.' });
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.type(item.imageMimeType).sendFile(imagePath, (error) => {
+    if (error && !res.headersSent) res.status(500).json({ error: 'Could not load the feedback image.' });
+  });
+});
+
+app.patch('/api/admin/client-feedback/:feedbackId', requireAdmin, (req, res) => {
+  const item = (db.clientFeedback || []).find((feedback) => feedback.id === req.params.feedbackId);
+  if (!item) return res.status(404).json({ error: 'Feedback not found.' });
+  if (!['new', 'reviewed'].includes(req.body?.status)) return res.status(400).json({ error: 'Choose a valid feedback status.' });
+  const previousStatus = item.status;
+  item.status = req.body.status;
+  try {
+    if (!saveDb(db)) throw new Error('Could not save the feedback status.');
+    res.json({ success: true, status: item.status });
+  } catch (error) {
+    item.status = previousStatus;
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/admin/client-feedback/:feedbackId', requireAdmin, (req, res) => {
+  db.clientFeedback ??= [];
+  const index = db.clientFeedback.findIndex((feedback) => feedback.id === req.params.feedbackId);
+  if (index < 0) return res.status(404).json({ error: 'Feedback not found.' });
+  const [item] = db.clientFeedback.splice(index, 1);
+  try {
+    if (!saveDb(db)) throw new Error('Could not delete the feedback entry.');
+  } catch (error) {
+    db.clientFeedback.splice(index, 0, item);
+    return res.status(500).json({ error: error.message });
+  }
+  if (item.imageFileName) {
+    try { fs.rmSync(path.join(clientFeedbackDirectory, path.basename(item.imageFileName)), { force: true }); }
+    catch (error) { console.error('Could not remove deleted feedback image:', error); }
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/admin/client-updates', requireAdmin, (_req, res) => {
   try {
     const currentPath = path.join(clientUpdateDirectory, 'current.json');
@@ -854,7 +1001,7 @@ app.post('/api/admin/assets', requireAdmin, (req, res) => {
 });
 
 if (adminPanelPath) {
-  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/client-updates', '/client-notifications', '/upload-client-update', '/cosmetic', '/cosmatic'];
+  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/partner-servers', '/client-feedback', '/client-updates', '/client-notifications', '/upload-client-update', '/cosmetic', '/cosmatic'];
   app.get([adminPanelPath, ...adminPages.map((page) => `${adminPanelPath}${page}`)], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 } else {
   app.get('/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
@@ -928,15 +1075,16 @@ app.post('/api/bacoins/admin/codes', (req, res) => {
 
 // ── Partner Servers Directory & Live Status ───────────────────────────────────
 function loadServersConfig() {
+  if (!fs.existsSync(serversFile)) return [];
   try {
-    if (fs.existsSync(serversFile)) {
-      const content = fs.readFileSync(serversFile, 'utf8');
-      return JSON.parse(content);
-    }
+    const content = fs.readFileSync(serversFile, 'utf8');
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed)) throw new Error('Partner server configuration must be a JSON array.');
+    return parsed;
   } catch (err) {
     console.error('Failed reading servers.json:', err);
+    throw new Error('Could not read partner server configuration.');
   }
-  return [];
 }
 
 function saveServersConfig(list) {
@@ -945,6 +1093,7 @@ function saveServersConfig(list) {
     fs.writeFileSync(serversFile, JSON.stringify(list, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed saving servers.json:', err);
+    throw new Error('Could not save partner server configuration.');
   }
 }
 
@@ -1040,48 +1189,69 @@ app.get('/api/servers', async (req, res) => {
   }
 });
 
-// Add or update a partner server in servers.json
-app.post('/api/servers', (req, res) => {
-  const { name, address, icon, color = 'server-blue', flag = 'Partner' } = req.body || {};
-  if (!name || !address) {
-    return res.status(400).json({ error: 'Name and address are required.' });
+const partnerServerColors = new Set(['server-blue', 'server-yellow', 'server-pink', 'server-red', 'server-gray', 'server-crimson']);
+
+function isValidServerAddress(address) {
+  if (address.length > 253 || /[\s/\\?#@]/.test(address)) return false;
+  const match = address.match(/^(?:\[([0-9a-fA-F:.]+)\]|((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*))(?::(\d{1,5}))?$/);
+  if (!match) return false;
+  const port = match[3];
+  return port === undefined || (Number(port) >= 1 && Number(port) <= 65535);
+}
+
+app.get('/api/admin/servers', requireAdmin, (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json({ servers: loadServersConfig() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-
-  const list = loadServersConfig();
-  const id = req.body.id || name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const existingIndex = list.findIndex((s) => s.id === id);
-
-  const newEntry = {
-    id,
-    name,
-    address,
-    icon: icon || name.charAt(0).toUpperCase(),
-    color,
-    flag,
-  };
-
-  if (existingIndex >= 0) {
-    list[existingIndex] = { ...list[existingIndex], ...newEntry };
-  } else {
-    list.push(newEntry);
-  }
-
-  saveServersConfig(list);
-  res.status(201).json({ success: true, server: newEntry });
 });
 
-// Delete a partner server
-app.delete('/api/servers/:id', (req, res) => {
-  const { id } = req.params;
-  const list = loadServersConfig();
-  const filtered = list.filter((s) => s.id !== id);
+app.post('/api/admin/servers', requireAdmin, (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+  const requestedId = typeof req.body?.id === 'string' ? req.body.id.trim().toLowerCase() : '';
+  const icon = typeof req.body?.icon === 'string' ? req.body.icon.trim() : '';
+  const color = typeof req.body?.color === 'string' ? req.body.color : 'server-blue';
+  const flag = typeof req.body?.flag === 'string' ? req.body.flag.trim() : 'Partner';
 
-  if (filtered.length === list.length) {
-    return res.status(404).json({ error: 'Server not found.' });
+  if (name.length < 2 || name.length > 60) return res.status(400).json({ error: 'Enter a server name between 2 and 60 characters.' });
+  if (!isValidServerAddress(address)) return res.status(400).json({ error: 'Enter a valid server address, optionally followed by a port.' });
+  if (requestedId && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(requestedId)) return res.status(400).json({ error: 'Server ID must use lowercase letters, numbers, and dashes.' });
+  if (!partnerServerColors.has(color)) return res.status(400).json({ error: 'Choose a valid server color.' });
+  if (flag.length > 24) return res.status(400).json({ error: 'Server label must be 24 characters or fewer.' });
+  if (icon.length > 2048 || (icon.length > 4 && !icon.startsWith('https://'))) return res.status(400).json({ error: 'Server icon must be a short label or an HTTPS image URL.' });
+
+  try {
+    const list = loadServersConfig();
+    let id = requestedId || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `server-${crypto.randomUUID().slice(0, 8)}`;
+    if (!requestedId) {
+      const baseId = id;
+      let suffix = 2;
+      while (list.some((server) => server.id === id)) id = `${baseId}-${suffix++}`;
+    }
+    const existingIndex = list.findIndex((server) => server.id === id);
+    const server = { id, name, address, icon: icon || name.charAt(0).toUpperCase(), color, flag: flag || 'Partner' };
+    if (existingIndex >= 0) list[existingIndex] = { ...list[existingIndex], ...server };
+    else list.push(server);
+    saveServersConfig(list);
+    res.status(existingIndex >= 0 ? 200 : 201).json({ success: true, server });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not save partner server.' });
   }
+});
 
-  saveServersConfig(filtered);
-  res.json({ success: true, message: 'Server removed.' });
+app.delete('/api/admin/servers/:id', requireAdmin, (req, res) => {
+  try {
+    const list = loadServersConfig();
+    const filtered = list.filter((server) => server.id !== req.params.id);
+    if (filtered.length === list.length) return res.status(404).json({ error: 'Server not found.' });
+    saveServersConfig(filtered);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not remove partner server.' });
+  }
 });
 
 // ── 24/7 Keep-Alive Self-Ping ─────────────────────────────────────────────────
@@ -1111,4 +1281,3 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Bayon Server] Servers API:  http://0.0.0.0:${PORT}/api/servers`);
   if (adminPanelPath) console.log(`[Bayon Server] Private store admin route: ${adminPanelPath}`);
 });
-

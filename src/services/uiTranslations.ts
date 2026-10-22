@@ -86,13 +86,13 @@ function localizeValue(value: string, language: string): string {
 function localizeTextNode(node: Text, language: string) {
   const original = translatedText.get(node);
   if (language === 'Khmer') {
-    if (khmerText[node.data.trim()]) {
-      translatedText.set(node, node.data);
-      node.data = localizeValue(node.data, language);
-    } else if (original && node.data === localizeValue(original, 'Khmer')) {
-      return;
-    }
-  } else if (original && node.data === localizeValue(original, 'Khmer')) {
+    if (original !== undefined && node.data === localizeValue(original, 'Khmer')) return;
+    const source = node.data;
+    const translated = localizeValue(source, language);
+    if (translated === node.data) return;
+    translatedText.set(node, source);
+    node.data = translated;
+  } else if (original !== undefined && node.data === localizeValue(original, 'Khmer') && node.data !== original) {
     node.data = original;
   }
 }
@@ -107,10 +107,13 @@ function localizeAttributes(element: Element, language: string) {
     const current = element.getAttribute(attribute);
     if (current === null) continue;
     const original = originals.get(attribute);
-    if (language === 'Khmer' && khmerText[current.trim()]) {
+    if (language === 'Khmer') {
+      if (original !== undefined && current === localizeValue(original, 'Khmer')) continue;
+      const translated = localizeValue(current, language);
+      if (translated === current) continue;
       originals.set(attribute, current);
-      element.setAttribute(attribute, localizeValue(current, language));
-    } else if (language !== 'Khmer' && original && current === localizeValue(original, 'Khmer')) {
+      element.setAttribute(attribute, translated);
+    } else if (original !== undefined && current === localizeValue(original, 'Khmer') && current !== original) {
       element.setAttribute(attribute, original);
     }
   }
