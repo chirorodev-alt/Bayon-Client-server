@@ -9,6 +9,7 @@ const dbFile = path.join(dataDir, 'db.json');
 const initialData = {
   users: [],
   friends: [],
+  clientNotifications: [],
   redeemCodes: [],
   cosmetics: [],
   adminBacoinsAdjustments: [],
@@ -31,6 +32,7 @@ export function loadDb() {
     const data = JSON.parse(raw);
     data.users ??= [];
     data.friends ??= [];
+    data.clientNotifications ??= [];
     data.redeemCodes ??= [];
     data.cosmetics ??= [];
     delete data.betaPairingCodes;

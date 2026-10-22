@@ -144,6 +144,10 @@ input[type='range'] {
   overflow: hidden;
 }
 
+.app-shell[lang="km"] {
+  font-family: "Khmer UI", "Leelawadee UI", "Noto Sans Khmer", "Segoe UI", sans-serif;
+}
+
 .title-bar {
   z-index: 20;
   display: flex;
@@ -203,6 +207,31 @@ input[type='range'] {
   height: 100%;
   align-items: center;
   gap: 8px;
+}
+
+.client-online-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  color: #e2eaf2;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.client-online-count small {
+  color: #8492a2;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.client-online-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #55d89a;
+  box-shadow: 0 0 10px #55d89a88;
 }
 
 .title-select {
@@ -405,6 +434,35 @@ input[type='range'] {
 
 .notification-popover {
   right: -26px;
+  width: 310px;
+  max-width: calc(100vw - 24px);
+  max-height: min(60vh, 460px);
+  overflow: auto;
+}
+
+.client-notification-item {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #253442;
+  border-radius: 7px;
+  background: #111923;
+  padding: 9px;
+}
+
+.client-notification-item > strong {
+  color: #eef4fb;
+  font-size: 11px;
+}
+
+.client-notification-item > span {
+  color: #b2bdc9;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.client-notification-item > small {
+  color: #78889a;
+  font-size: 9px;
 }
 
 .window-controls {

@@ -1257,6 +1257,11 @@ app.whenReady().then(() => {
     assertTrustedRenderer(event);
     return appUpdateState;
   });
+
+  ipcMain.handle('app:get-version', (event) => {
+    assertTrustedRenderer(event);
+    return app.getVersion();
+  });
   ipcMain.handle('auth:google-start', async (event, clientId) => {
     assertTrustedRenderer(event);
     return startGoogleOAuth(clientId);

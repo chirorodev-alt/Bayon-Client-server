@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createDiagnosticReport: () => ipcRenderer.invoke('recovery:create-diagnostic'),
   clearClientData: () => ipcRenderer.invoke('recovery:clear-data'),
   getAppUpdateState: () => ipcRenderer.invoke('app-update:get-state'),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForAppUpdate: () => ipcRenderer.invoke('app-update:check'),
   installAppUpdate: () => ipcRenderer.invoke('app-update:install'),
   startGoogleOAuth: (clientId) => ipcRenderer.invoke('auth:google-start', clientId),

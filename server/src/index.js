@@ -39,6 +39,35 @@ app.use(express.json({ limit: '18mb' }));
 
 // Load in-memory DB state with file sync
 let db = loadDb();
+const clientHeartbeats = new Map();
+const CLIENT_HEARTBEAT_TTL_MS = 90_000;
+
+function pruneClientHeartbeats(now = Date.now()) {
+  for (const [clientId, lastSeen] of clientHeartbeats) {
+    if (now - lastSeen > CLIENT_HEARTBEAT_TTL_MS) clientHeartbeats.delete(clientId);
+  }
+}
+
+app.post('/api/client-presence', (req, res) => {
+  const clientId = typeof req.body?.clientId === 'string' ? req.body.clientId : '';
+  if (!/^[a-f0-9-]{36}$/i.test(clientId)) return res.status(400).json({ error: 'A valid anonymous client session ID is required.' });
+  pruneClientHeartbeats();
+  clientHeartbeats.set(clientId, Date.now());
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ onlineUsers: clientHeartbeats.size, expiresInSeconds: CLIENT_HEARTBEAT_TTL_MS / 1000 });
+});
+
+app.get('/api/client-presence', (_req, res) => {
+  pruneClientHeartbeats();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ onlineUsers: clientHeartbeats.size });
+});
+
+app.get('/api/client-notifications', (_req, res) => {
+  const notifications = (db.clientNotifications || []).slice(-30).reverse();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ notifications });
+});
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store.html')));
@@ -611,6 +640,20 @@ function requireAdmin(req, res, next) {
   } catch { res.status(401).json({ error: 'Admin sign-in required.' }); }
 }
 
+app.post('/api/admin/client-notifications', requireAdmin, (req, res) => {
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const level = ['info', 'success', 'warning'].includes(req.body?.level) ? req.body.level : 'info';
+  if (!title || title.length > 90) return res.status(400).json({ error: 'Enter a notification title (up to 90 characters).' });
+  if (!message || message.length > 500) return res.status(400).json({ error: 'Enter a message (up to 500 characters).' });
+  db.clientNotifications ??= [];
+  const notification = { id: crypto.randomUUID(), title, message, level, createdAt: new Date().toISOString() };
+  db.clientNotifications.push(notification);
+  db.clientNotifications = db.clientNotifications.slice(-100);
+  saveDb(db);
+  res.status(201).json({ notification });
+});
+
 app.get('/api/admin/client-updates', requireAdmin, (_req, res) => {
   try {
     const currentPath = path.join(clientUpdateDirectory, 'current.json');
@@ -811,7 +854,7 @@ app.post('/api/admin/assets', requireAdmin, (req, res) => {
 });
 
 if (adminPanelPath) {
-  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/client-updates', '/upload-client-update', '/cosmetic', '/cosmatic'];
+  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/client-updates', '/client-notifications', '/upload-client-update', '/cosmetic', '/cosmatic'];
   app.get([adminPanelPath, ...adminPages.map((page) => `${adminPanelPath}${page}`)], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 } else {
   app.get('/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));

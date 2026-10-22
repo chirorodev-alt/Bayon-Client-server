@@ -144,6 +144,7 @@ declare global {
       createDiagnosticReport: () => Promise<{ path: string }>;
       clearClientData: () => Promise<{ success: boolean }>;
       getAppUpdateState: () => Promise<AppUpdateState>;
+      getAppVersion: () => Promise<string>;
       checkForAppUpdate: () => Promise<AppUpdateState>;
       installAppUpdate: () => Promise<boolean>;
       startGoogleOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;

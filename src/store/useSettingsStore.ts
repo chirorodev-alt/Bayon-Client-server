@@ -8,9 +8,7 @@ export type SettingsState = {
   language: string;
   defaultVersion: string;
   selectedRam: number;
-  fpsLimit: number;
   resolution: string;
-  renderDistance: string;
   javaPath: string;
   customArgs: string;
   animationLevel: string;
@@ -21,9 +19,7 @@ export type SettingsState = {
   setLanguage: (value: string) => void;
   setDefaultVersion: (value: string) => void;
   setSelectedRam: (value: number) => void;
-  setFpsLimit: (value: number) => void;
   setResolution: (value: string) => void;
-  setRenderDistance: (value: string) => void;
   setJavaPath: (value: string) => void;
   setCustomArgs: (value: string) => void;
   setAnimationLevel: (value: string) => void;
@@ -38,9 +34,7 @@ const defaultSettings = {
   language: 'English (US)',
   defaultVersion: '26.3',
   selectedRam: 8,
-  fpsLimit: 144,
   resolution: '1920x1080',
-  renderDistance: '12 Chunks',
   javaPath: '',
   customArgs: '-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC',
   animationLevel: 'Smooth',
@@ -57,9 +51,7 @@ export const useSettingsStore = create<SettingsState>()(
       setLanguage: (value) => set({ language: value }),
       setDefaultVersion: (value) => set({ defaultVersion: value }),
       setSelectedRam: (value) => set({ selectedRam: value }),
-      setFpsLimit: (value) => set({ fpsLimit: value }),
       setResolution: (value) => set({ resolution: value }),
-      setRenderDistance: (value) => set({ renderDistance: value }),
       setJavaPath: (value) => set({ javaPath: value }),
       setCustomArgs: (value) => set({ customArgs: value }),
       setAnimationLevel: (value) => set({ animationLevel: value }),

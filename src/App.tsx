@@ -55,6 +55,8 @@ import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
 import type { AppUpdateState, BayonModStatus, ClientDirectories, DiscordPresenceStatus, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
 import bayonIcon from './assets/bayon-icon.png';
+import { BACKEND_BASE_URL } from './services/backendConfig';
+import { localizeApp } from './services/uiTranslations';
 
 const SkinModelPreview = lazy(() => import('./components/SkinModelPreview').then((module) => ({ default: module.SkinModelPreview })));
 
@@ -78,7 +80,7 @@ const navItems: NavItem[] = [
 
 const navigationLabels = {
   English: ['Play', 'Profiles', 'Accounts', 'Store', 'Settings', 'Mods', 'Skins'],
-  Khmer: ['លេង', 'ប្រវត្តិរូប', 'គណនី', 'ហាង', 'ការកំណត់', 'មូដ', 'ស្បែក'],
+  Khmer: ['\u179B\u17C1\u1784', '\u1794\u17D2\u179A\u17BC\u17A0\u17D2\u179C\u17B6\u179B\u17CB', '\u1782\u178E\u1793\u17B8', '\u17A0\u17B6\u1784', '\u1780\u17B6\u179A\u1780\u17C6\u178E\u178F\u17CB', '\u1798\u17C9\u17BC\u178A', '\u179F\u17D2\u1794\u17C2\u1780'],
 } as const;
 
 const versions = ['26.3', '26.2'];
@@ -156,6 +158,16 @@ function AppShell() {
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const discordPresence = useSettingsStore((state) => state.discordPresence);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>('.app-shell');
+    if (!root) return;
+    const applyTranslations = () => localizeApp(root, language);
+    applyTranslations();
+    const observer = new MutationObserver(applyTranslations);
+    observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['aria-label', 'title', 'placeholder'] });
+    return () => observer.disconnect();
+  }, [language]);
 
   useEffect(() => {
     const api = (window as Window & { electronAPI?: { onWindowStateChange: (cb: (state: WindowState) => void) => void } }).electronAPI;
@@ -245,9 +257,49 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [betaBusy, setBetaBusy] = useState(false);
   const [betaNotice, setBetaNotice] = useState('');
   const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
+  const [onlineUsers, setOnlineUsers] = useState<number | null>(null);
+  const [clientNotifications, setClientNotifications] = useState<{ id: string; title: string; message: string; createdAt: string; level: string }[]>([]);
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   const setLanguage = useSettingsStore((state) => state.setLanguage);
+
+  useEffect(() => {
+    let stopped = false;
+    const storageKey = 'bayon-client-presence-id';
+    let clientId = localStorage.getItem(storageKey);
+    if (!clientId) {
+      clientId = crypto.randomUUID();
+      localStorage.setItem(storageKey, clientId);
+    }
+    const heartbeat = async () => {
+      try {
+        const response = await fetch(`${BACKEND_BASE_URL}/api/client-presence`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId }),
+        });
+        if (!response.ok) throw new Error('Presence unavailable');
+        const data = await response.json() as { onlineUsers: number };
+        if (!stopped) setOnlineUsers(data.onlineUsers);
+      } catch { if (!stopped) setOnlineUsers(null); }
+    };
+    void heartbeat();
+    const interval = window.setInterval(() => void heartbeat(), 30_000);
+    return () => { stopped = true; window.clearInterval(interval); };
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    const refreshNotifications = async () => {
+      try {
+        const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications`);
+        if (!response.ok) return;
+        const result = await response.json() as { notifications?: typeof clientNotifications };
+        if (!stopped) setClientNotifications(result.notifications ?? []);
+      } catch { /* Keep the menu usable while offline. */ }
+    };
+    void refreshNotifications();
+    const interval = window.setInterval(() => void refreshNotifications(), 60_000);
+    return () => { stopped = true; window.clearInterval(interval); };
+  }, []);
 
   useEffect(() => {
     const refreshIdentity = () => {
@@ -292,6 +344,9 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
           </button>
           {accountOpen && <div className="title-popover"><strong>{activeAccount?.username ?? 'No account selected'}</strong><span>{activeAccount ? 'Offline account' : 'Create an offline account to continue'}</span><NavLink to="/accounts" onClick={() => setAccountOpen(false)}>Manage accounts</NavLink></div>}
         </div>
+        <div className="client-online-count" title="Bayon Client sessions active in the last 90 seconds" aria-label={`${onlineUsers ?? '—'} Bayon Client users online`}>
+          <span className="client-online-indicator" />{onlineUsers === null ? '—' : onlineUsers.toLocaleString()} <small>{language === 'Khmer' ? 'កំពុងប្រើ' : 'online'}</small>
+        </div>
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select language-select" onClick={() => setLanguageOpen(!languageOpen)} aria-label="Choose language" aria-expanded={languageOpen}>
             <span className="language-flag" aria-hidden="true">{language === 'Khmer' ? '🇰🇭' : '🇬🇧'}</span>
@@ -327,7 +382,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         </div>
         <div className="title-dropdown-wrap">
           <button type="button" onClick={() => setNotificationOpen(!notificationOpen)} className="window-control" aria-label="Notifications"><Bell className="h-4 w-4" /></button>
-          {notificationOpen && <div className="title-popover notification-popover"><strong>Notifications</strong><span>Youâ€™re all caught up.</span></div>}
+          {notificationOpen && <div className="title-popover notification-popover"><strong>{language === 'Khmer' ? 'ការជូនដំណឹង' : 'Notifications'}</strong>{clientNotifications.length ? clientNotifications.map((item) => <article className="client-notification-item" key={item.id}><strong>{item.title}</strong><span>{item.message}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>) : <span>{language === 'Khmer' ? 'មិនមានការជូនដំណឹងថ្មីទេ។' : 'You’re all caught up.'}</span>}</div>}
         </div>
         <div className="window-controls">
           <button type="button" onClick={() => data?.minimize?.()} className="window-control" aria-label="Minimize"><Minus className="h-4 w-4" /></button>
@@ -342,6 +397,8 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
 function Sidebar() {
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
+  const [appVersion, setAppVersion] = useState('1.0.2');
+  useEffect(() => { void window.electronAPI?.getAppVersion().then(setAppVersion).catch(() => {}); }, []);
   return (
     <aside className="sidebar">
       <nav className="sidebar-nav">
@@ -371,7 +428,7 @@ function Sidebar() {
         </div>
         <div className="client-version">
           <LogoMark />
-          <span><strong>BAYON CLIENT</strong><small>v1.0.1</small></span>
+          <span><strong>BAYON CLIENT</strong><small>v{appVersion}</small></span>
           <ChevronRight className="h-4 w-4" />
         </div>
       </div>
@@ -1104,11 +1161,7 @@ function PlayPage() {
           </div>
 
           <div className="mt-5 grid gap-5 md:grid-cols-2">
-            <div>
-              <Label>FPS Cap</Label>
-              <Select value={String(settings.fpsLimit)} onChange={(value) => settings.setFpsLimit(Number(value))} options={['60', '120', '144', '240']} />
-            </div>
-            <div>
+            <div className="md:col-span-2">
               <Label>Launch Arguments</Label>
               <input value={settings.customArgs} onChange={(e) => settings.setCustomArgs(e.target.value)} className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20" />
             </div>
@@ -1792,16 +1845,8 @@ function SettingsPage() {
               </div>
             </div>
             <div>
-              <SettingLabel icon={Monitor}>FPS limit</SettingLabel>
-              <Select value={String(settings.fpsLimit)} onChange={(v) => settings.setFpsLimit(Number(v))} options={['60', '120', '144', '240']} />
-            </div>
-            <div>
               <SettingLabel icon={Monitor}>Resolution</SettingLabel>
               <Select value={settings.resolution} onChange={settings.setResolution} options={['1920x1080', '2560x1440', '3840x2160']} />
-            </div>
-            <div>
-              <SettingLabel icon={Globe}>Render distance</SettingLabel>
-              <Select value={settings.renderDistance} onChange={settings.setRenderDistance} options={['6 Chunks', '8 Chunks', '12 Chunks', '16 Chunks']} />
             </div>
             <section className="settings-java-panel md:col-span-2">
               <div className="settings-java-heading"><Download className="h-5 w-5" /><div><strong>Bayon Client Runtime</strong><p>Bayon checks for Java already installed on your device and automatically uses a compatible runtime for each profile.</p></div></div>
