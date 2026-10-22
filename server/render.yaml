@@ -24,6 +24,4 @@ services:
         sync: false
       - key: MICROSOFT_CLIENT_ID
         sync: false
-      - key: BACOIN_BETA_MODE
-        value: "true"
 

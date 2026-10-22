@@ -20,6 +20,8 @@ let nextConsoleLogId = 1;
 let appUpdateState = { status: 'idle' };
 let appUpdateVersion = '';
 let discordRpcClient = null;
+let discordReconnectTimer = null;
+let appQuitting = false;
 let discordClientId = null;
 let discordConfigPath = null;
 let customMinecraftDataRoot = null;
@@ -152,6 +154,79 @@ function startGoogleOAuth(clientId) {
   });
 }
 
+function startMicrosoftOAuth(clientId) {
+  if (typeof clientId !== 'string' || clientId.length < 10 || clientId.length > 128) {
+    return Promise.reject(new Error('Microsoft OAuth client ID is invalid.'));
+  }
+  const state = randomBytes(32).toString('base64url');
+  const verifier = randomBytes(48).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout;
+    let callbackServer;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callbackServer?.close();
+      if (error) reject(error);
+      else resolve(result);
+    };
+    callbackServer = http.createServer((request, response) => {
+      const callbackUrl = new URL(request.url || '/', 'http://127.0.0.1');
+      if (callbackUrl.pathname !== '/') {
+        response.writeHead(404).end('Not found');
+        return;
+      }
+      const receivedState = callbackUrl.searchParams.get('state') || '';
+      const expectedState = Buffer.from(state);
+      const actualState = Buffer.from(receivedState);
+      if (actualState.length !== expectedState.length || !timingSafeEqual(actualState, expectedState)) {
+        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Bayon sign-in failed</h2><p>State verification failed. You can close this tab.</p>');
+        finish(new Error('Microsoft sign-in state verification failed.'));
+        return;
+      }
+      const error = callbackUrl.searchParams.get('error');
+      const code = callbackUrl.searchParams.get('code');
+      if (error || !code) {
+        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Bayon sign-in canceled</h2><p>You can close this tab and return to the client.</p>');
+        finish(new Error(error === 'access_denied' ? 'Microsoft sign-in was canceled.' : 'Microsoft did not return an authorization code.'));
+        return;
+      }
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Microsoft account connected</h2><p>You can close this tab and return to Bayon Client.</p>');
+      finish(null, { code, codeVerifier: verifier, redirectUri });
+    });
+
+    callbackServer.once('error', (error) => finish(error));
+    callbackServer.listen(0, 'localhost', async () => {
+      const address = callbackServer.address();
+      if (!address || typeof address === 'string') return finish(new Error('Could not start the local Microsoft sign-in callback.'));
+      const redirectUri = `http://localhost:${address.port}`;
+      const authUrl = new URL('https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize');
+      authUrl.search = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        response_mode: 'query',
+        scope: 'openid profile email User.Read',
+        state,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        prompt: 'select_account',
+      }).toString();
+      timeout = setTimeout(() => finish(new Error('Microsoft sign-in timed out. Please try again.')), 4 * 60 * 1000);
+      timeout.unref?.();
+      try {
+        await shell.openExternal(authUrl.toString());
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('Could not open your browser for Microsoft sign-in.'));
+      }
+    });
+  });
+}
+
 function publishDiscordPresenceStatus(state, message, configured = Boolean(discordClientId)) {
   console.log(`[Discord RPC] Status: ${state} - ${message}`);
   discordPresenceStatus = { state, message, configured };
@@ -175,9 +250,11 @@ function getDiscordActivity() {
     details,
     state,
     startTimestamp: typeof discordActivity.startTimestamp === 'number' ? discordActivity.startTimestamp : launcherStartTime,
-    largeImageKey: discordActivity.largeImageKey || 'bayon_logo',
-    largeImageText: discordActivity.largeImageText || 'Bayon Client',
+    instance: true,
   };
+
+  if (discordActivity.largeImageKey) activity.largeImageKey = discordActivity.largeImageKey;
+  if (discordActivity.largeImageText && discordActivity.largeImageKey) activity.largeImageText = discordActivity.largeImageText;
 
   if (typeof discordActivity.endTimestamp === 'number') {
     activity.endTimestamp = discordActivity.endTimestamp;
@@ -185,14 +262,10 @@ function getDiscordActivity() {
 
   if (discordActivity.smallImageKey) {
     activity.smallImageKey = discordActivity.smallImageKey;
-  } else if (discordActivity.version) {
-    activity.smallImageKey = 'minecraft';
   }
 
   if (typeof discordActivity.smallImageText === 'string' && discordActivity.smallImageText.trim().length > 0) {
     activity.smallImageText = discordActivity.smallImageText.trim();
-  } else if (discordActivity.version) {
-    activity.smallImageText = `${discordActivity.loader ? `${discordActivity.loader} ` : ''}${discordActivity.version}`;
   }
 
   if (discordActivity.partyId && typeof discordActivity.partySize === 'number' && typeof discordActivity.partyMax === 'number') {
@@ -228,6 +301,10 @@ function getDiscordActivity() {
 }
 
 async function connectDiscordPresence(clientId) {
+  if (discordReconnectTimer) {
+    clearTimeout(discordReconnectTimer);
+    discordReconnectTimer = null;
+  }
   discordClientId = clientId;
   if (discordRpcClient) {
     const previousClient = discordRpcClient;
@@ -252,7 +329,10 @@ async function connectDiscordPresence(clientId) {
     } catch (error) {
       console.error('[Discord RPC Activity Error]:', error);
       if (discordRpcClient === client) {
+        discordRpcClient = null;
         publishDiscordPresenceStatus('error', `Could not publish Discord activity: ${error.message}`);
+        void client.destroy().catch(() => {});
+        scheduleDiscordReconnect(clientId);
       }
     }
   });
@@ -260,23 +340,39 @@ async function connectDiscordPresence(clientId) {
     if (discordRpcClient === client) {
       discordRpcClient = null;
       publishDiscordPresenceStatus('discord-not-running', 'Discord disconnected. Open Discord and reconnect.', true);
+      scheduleDiscordReconnect(clientId);
     }
   });
   client.on('error', (error) => {
     if (discordRpcClient === client) {
+      discordRpcClient = null;
       publishDiscordPresenceStatus('error', `Discord Rich Presence error: ${error.message}`);
+      void client.destroy().catch(() => {});
+      scheduleDiscordReconnect(clientId);
     }
   });
 
   try {
     await client.login({ clientId });
-  } catch {
+  } catch (error) {
     if (discordRpcClient === client) {
       discordRpcClient = null;
-      publishDiscordPresenceStatus('discord-not-running', 'Could not connect. Make sure the Discord desktop app is open.', true);
+      const message = error instanceof Error ? error.message : 'Unknown Discord RPC error.';
+      console.warn(`[Discord RPC] Connection failed: ${message}`);
+      publishDiscordPresenceStatus('discord-not-running', `Could not connect to Discord (${message}). Keep the desktop app open; Bayon will retry.`, true);
+      scheduleDiscordReconnect(clientId);
     }
   }
   return discordPresenceStatus;
+}
+
+function scheduleDiscordReconnect(clientId) {
+  if (discordReconnectTimer || !clientId || discordClientId !== clientId || appQuitting) return;
+  discordReconnectTimer = setTimeout(() => {
+    discordReconnectTimer = null;
+    if (discordClientId === clientId && !discordRpcClient) void connectDiscordPresence(clientId);
+  }, 15000);
+  discordReconnectTimer.unref?.();
 }
 
 function loadDiscordClientId() {
@@ -466,6 +562,95 @@ function getModsDir(profileId) {
 
 function getModsConfigPath(profileId) {
   return path.join(app.getPath('userData'), `installed-mods-${normalizeProfileId(profileId)}.json`);
+}
+
+const BAYON_MOD_FILENAME = 'bayonclient-client.jar';
+
+function getBayonModBundle() {
+  const bundledDirectory = app.isPackaged
+    ? path.join(process.resourcesPath, 'bayon-mod')
+    : path.join(__dirname, '..', 'fabric-mod', 'dist');
+  const jarPath = path.join(bundledDirectory, 'bayonclient.jar');
+  const metadataPath = path.join(bundledDirectory, 'bayonclient.json');
+  if (!existsSync(jarPath) || !existsSync(metadataPath)) {
+    throw new Error('Bayon Client Fabric mod is not built yet. Run `gradlew.bat build` in the fabric-mod folder first.');
+  }
+  const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+  return { jarPath, version: String(metadata.version || 'unknown'), gameVersion: String(metadata.minecraftVersion || '26.2') };
+}
+
+function getBayonModManifestPath(profileId) {
+  return path.join(getProfileGameDir(profileId), '.bayonclient-managed-mod.json');
+}
+
+function getBayonModStatus(profileId) {
+  let bundle;
+  try { bundle = getBayonModBundle(); } catch (error) {
+    return { available: false, installed: false, version: null, error: error.message };
+  }
+  let manifest = null;
+  try { manifest = JSON.parse(readFileSync(getBayonModManifestPath(profileId), 'utf8')); } catch {}
+  const modsDir = getModsDir(profileId);
+  const installedPath = manifest?.filename ? path.join(modsDir, path.basename(manifest.filename)) : '';
+  const installed = Boolean(installedPath && existsSync(installedPath) && manifest?.sha256 === createHash('sha256').update(readFileSync(installedPath)).digest('hex'));
+  return {
+    available: true,
+    installed,
+    version: bundle.version,
+    gameVersion: bundle.gameVersion,
+    installedVersion: installed ? manifest.version : null,
+    filename: installed ? manifest.filename : null,
+  };
+}
+
+function installBayonMod(profileId) {
+  const safeProfileId = normalizeProfileId(profileId);
+  const bundle = getBayonModBundle();
+  const modsDir = getModsDir(safeProfileId);
+  const manifestPath = getBayonModManifestPath(safeProfileId);
+  const targetPath = path.join(modsDir, BAYON_MOD_FILENAME);
+  let previous = null;
+  try { previous = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch {}
+
+  if (existsSync(targetPath)) {
+    if (!previous || previous.filename !== BAYON_MOD_FILENAME) {
+      throw new Error(`A file named ${BAYON_MOD_FILENAME} already exists in this profile. It was left untouched; move or rename it before installing Bayon Client.`);
+    }
+    const existingHash = createHash('sha256').update(readFileSync(targetPath)).digest('hex');
+    if (existingHash !== previous.sha256) {
+      throw new Error('The existing Bayon mod JAR was changed outside the launcher. It was left untouched to protect your file.');
+    }
+  }
+
+  const source = readFileSync(bundle.jarPath);
+  const sha256 = createHash('sha256').update(source).digest('hex');
+  const temporaryPath = `${targetPath}.installing`;
+  writeFileSync(temporaryPath, source, { flag: 'w' });
+  renameSync(temporaryPath, targetPath);
+  writeFileSync(manifestPath, JSON.stringify({
+    filename: BAYON_MOD_FILENAME,
+    version: bundle.version,
+    gameVersion: bundle.gameVersion,
+    sha256,
+    installedAt: Date.now(),
+  }, null, 2), 'utf8');
+  return getBayonModStatus(safeProfileId);
+}
+
+function uninstallBayonMod(profileId) {
+  const safeProfileId = normalizeProfileId(profileId);
+  const manifestPath = getBayonModManifestPath(safeProfileId);
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { return getBayonModStatus(safeProfileId); }
+  const filename = path.basename(String(manifest.filename || ''));
+  const modPath = path.join(getModsDir(safeProfileId), filename);
+  if (filename === BAYON_MOD_FILENAME && existsSync(modPath)) {
+    const sha256 = createHash('sha256').update(readFileSync(modPath)).digest('hex');
+    if (sha256 !== manifest.sha256) throw new Error('Bayon mod JAR changed outside the launcher, so it was left untouched.');
+    unlinkSync(modPath);
+  }
+  unlinkSync(manifestPath);
+  return getBayonModStatus(safeProfileId);
 }
 
 function readInstalledMods(profileId) {
@@ -973,7 +1158,7 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
-  autoUpdater.disableDifferentialDownload = false;
+  autoUpdater.disableDifferentialDownload = true;
   autoUpdater.on('checking-for-update', () => publishAppUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (info) => {
     appUpdateVersion = info.version;
@@ -1075,6 +1260,10 @@ app.whenReady().then(() => {
   ipcMain.handle('auth:google-start', async (event, clientId) => {
     assertTrustedRenderer(event);
     return startGoogleOAuth(clientId);
+  });
+  ipcMain.handle('auth:microsoft-start', async (event, clientId) => {
+    assertTrustedRenderer(event);
+    return startMicrosoftOAuth(clientId);
   });
   ipcMain.handle('app-update:check', async (event) => {
     assertTrustedRenderer(event);
@@ -1257,7 +1446,12 @@ app.whenReady().then(() => {
     return discordPresenceStatus;
   });
 
-  ipcMain.handle('discord:configure-presence', async (event, clientId) => {
+  ipcMain.handle('discord:presence-config', (event) => {
+    assertTrustedRenderer(event);
+    return { clientId: loadDiscordClientId() };
+  });
+
+  ipcMain.handle('discord:configure-presence', async (event, clientId = DEFAULT_DISCORD_CLIENT_ID) => {
     assertTrustedRenderer(event);
     if (typeof clientId !== 'string' || !/^\d{17,20}$/.test(clientId)) {
       throw new Error('Enter a valid 17–20 digit Discord Application ID.');
@@ -1302,6 +1496,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('discord:disable-presence', async (event) => {
     assertTrustedRenderer(event);
+    if (discordReconnectTimer) {
+      clearTimeout(discordReconnectTimer);
+      discordReconnectTimer = null;
+    }
     discordClientId = null;
     if (discordConfigPath && existsSync(discordConfigPath)) {
       writeFileSync(discordConfigPath, JSON.stringify({ clientId: null }), 'utf8');
@@ -1374,6 +1572,21 @@ app.whenReady().then(() => {
   ipcMain.handle('mods:get-installed', (event, profileId) => {
     assertTrustedRenderer(event);
     return readInstalledMods(profileId);
+  });
+
+  ipcMain.handle('mods:bayon-status', (event, profileId) => {
+    assertTrustedRenderer(event);
+    return getBayonModStatus(profileId);
+  });
+
+  ipcMain.handle('mods:bayon-install', (event, profileId) => {
+    assertTrustedRenderer(event);
+    return installBayonMod(profileId);
+  });
+
+  ipcMain.handle('mods:bayon-uninstall', (event, profileId) => {
+    assertTrustedRenderer(event);
+    return uninstallBayonMod(profileId);
   });
 
   ipcMain.handle('mods:install-modrinth', async (event, payload) => {
@@ -1602,13 +1815,6 @@ app.whenReady().then(() => {
 
   createWindow();
   setupAutoUpdater();
-  try {
-    const savedDiscordClientId = loadDiscordClientId();
-    if (savedDiscordClientId) void connectDiscordPresence(savedDiscordClientId);
-  } catch (error) {
-    publishDiscordPresenceStatus('error', error.message, true);
-  }
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1618,4 +1824,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  appQuitting = true;
+  if (discordReconnectTimer) clearTimeout(discordReconnectTimer);
+  discordReconnectTimer = null;
 });

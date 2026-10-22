@@ -10,6 +10,8 @@ type SkinModelPreviewProps = {
   rotation: number;
   slimArms: boolean;
   onRotationChange: (rotation: number) => void;
+  autoRotate?: boolean;
+  flightPose?: boolean;
 };
 
 const faceMaterialOrder = ['right', 'left', 'top', 'bottom', 'front', 'back'] as const;
@@ -157,7 +159,7 @@ function disposeObject(root: THREE.Object3D) {
   });
 }
 
-export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRotationChange }: SkinModelPreviewProps) {
+export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRotationChange, autoRotate = false, flightPose = false }: SkinModelPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<{ renderer: THREE.WebGLRenderer; player: THREE.Group; render: () => void } | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; rotation: number } | null>(null);
@@ -231,10 +233,20 @@ export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRot
 
       add(createTexturedCube(textureSource, 8, 8, 8, new THREE.Vector3(0, 14, 0), head));
       add(createTexturedCube(textureSource, 8, 12, 4, new THREE.Vector3(0, 4, 0), body));
-      add(createTexturedCube(textureSource, armWidth, 12, 4, new THREE.Vector3(-armOffset, 4, 0), rightArm, rightArm));
-      add(createTexturedCube(textureSource, armWidth, 12, 4, new THREE.Vector3(armOffset, 4, 0), leftArm, rightArm));
-      add(createTexturedCube(textureSource, 4, 12, 4, new THREE.Vector3(-2, -8, 0), rightLeg, rightLeg));
-      add(createTexturedCube(textureSource, 4, 12, 4, new THREE.Vector3(2, -8, 0), leftLeg, rightLeg));
+      const rightArmMesh = createTexturedCube(textureSource, armWidth, 12, 4, new THREE.Vector3(-armOffset, 4, 0), rightArm, rightArm);
+      const leftArmMesh = createTexturedCube(textureSource, armWidth, 12, 4, new THREE.Vector3(armOffset, 4, 0), leftArm, rightArm);
+      const rightLegMesh = createTexturedCube(textureSource, 4, 12, 4, new THREE.Vector3(-2, -8, 0), rightLeg, rightLeg);
+      const leftLegMesh = createTexturedCube(textureSource, 4, 12, 4, new THREE.Vector3(2, -8, 0), leftLeg, rightLeg);
+      if (flightPose) {
+        rightArmMesh.rotation.z = -1.02;
+        leftArmMesh.rotation.z = 1.02;
+        rightLegMesh.rotation.z = -0.12;
+        leftLegMesh.rotation.z = 0.12;
+      }
+      add(rightArmMesh);
+      add(leftArmMesh);
+      add(rightLegMesh);
+      add(leftLegMesh);
 
       if (!legacy) {
         const overlayHead: CubeFaces = [
@@ -258,8 +270,14 @@ export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRot
         ];
         add(createTexturedCube(textureSource, 8.6, 8.6, 8.6, new THREE.Vector3(0, 14, 0), overlayHead, undefined, true));
         add(createTexturedCube(textureSource, 8.4, 12.4, 4.4, new THREE.Vector3(0, 4, 0), overlayBody, undefined, true));
-        add(createTexturedCube(textureSource, armWidth + 0.4, 12.4, 4.4, new THREE.Vector3(-armOffset, 4, 0), overlayArmRight, undefined, true));
-        add(createTexturedCube(textureSource, armWidth + 0.4, 12.4, 4.4, new THREE.Vector3(armOffset, 4, 0), overlayArmLeft, undefined, true));
+        const rightArmLayer = createTexturedCube(textureSource, armWidth + 0.4, 12.4, 4.4, new THREE.Vector3(-armOffset, 4, 0), overlayArmRight, undefined, true);
+        const leftArmLayer = createTexturedCube(textureSource, armWidth + 0.4, 12.4, 4.4, new THREE.Vector3(armOffset, 4, 0), overlayArmLeft, undefined, true);
+        if (flightPose) {
+          rightArmLayer.rotation.z = -1.02;
+          leftArmLayer.rotation.z = 1.02;
+        }
+        add(rightArmLayer);
+        add(leftArmLayer);
         add(createTexturedCube(textureSource, 4.4, 12.4, 4.4, new THREE.Vector3(-2, -8, 0), overlayLegRight, undefined, true));
         add(createTexturedCube(textureSource, 4.4, 12.4, 4.4, new THREE.Vector3(2, -8, 0), overlayLegLeft, undefined, true));
       }
@@ -333,7 +351,7 @@ export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRot
       skinTexture?.dispose();
       renderer.dispose();
     };
-  }, [imageUrl, skinName, slimArms]);
+  }, [imageUrl, skinName, slimArms, flightPose]);
 
   useEffect(() => {
     const preview = previewRef.current;
@@ -341,6 +359,27 @@ export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRot
     preview.player.rotation.y = THREE.MathUtils.degToRad(rotation);
     preview.render();
   }, [rotation]);
+
+  useEffect(() => {
+    if (!autoRotate) return;
+    let frame = 0;
+    let previous = performance.now();
+    const animate = (now: number) => {
+      const preview = previewRef.current;
+      if (preview && document.visibilityState === 'visible') {
+        preview.player.rotation.y += (now - previous) * 0.00028;
+        if (flightPose) {
+          preview.player.position.y = Math.sin(now * 0.0017) * 0.7;
+          preview.player.rotation.z = Math.sin(now * 0.0008) * 0.025;
+        }
+        preview.render();
+      }
+      previous = now;
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [autoRotate, flightPose]);
 
   return (
     <div className="skin-model-wrap" aria-label={`3D preview of ${skinName}`} data-rotation={rotation}>

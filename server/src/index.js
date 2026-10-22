@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
 import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { loadDb, saveDb } from './db.js';
 
@@ -37,7 +39,6 @@ app.use(express.json({ limit: '18mb' }));
 
 // Load in-memory DB state with file sync
 let db = loadDb();
-const storePairAttempts = new Map();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store.html')));
@@ -273,6 +274,22 @@ const mediaDirectory = path.join(__dirname, '..', 'data', 'cosmetics');
 fs.mkdirSync(mediaDirectory, { recursive: true });
 app.use('/media/cosmetics', express.static(mediaDirectory, { fallthrough: false, maxAge: '1d' }));
 
+const clientUpdateDirectory = process.env.CLIENT_UPDATE_STORAGE_DIR || path.join(__dirname, '..', 'data', 'client-updates');
+const clientUpdateIncomingDirectory = path.join(clientUpdateDirectory, '.incoming');
+const clientUpdateUploadSessions = new Map();
+const clientUpdateChunkSize = 4 * 1024 * 1024;
+const clientUpdateMaxSize = 1024 * 1024 * 1024;
+fs.mkdirSync(clientUpdateIncomingDirectory, { recursive: true });
+const configuredUpdateBaseVersion = process.env.CLIENT_UPDATE_BASE_VERSION || '1.0.1';
+const initialUpdateVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(configuredUpdateBaseVersion) ? configuredUpdateBaseVersion : '1.0.1';
+if (!fs.existsSync(path.join(clientUpdateDirectory, 'latest.yml'))) {
+  fs.writeFileSync(path.join(clientUpdateDirectory, 'latest.yml'), `version: ${initialUpdateVersion}\nfiles: []\nreleaseDate: ${new Date().toISOString()}\n`, 'utf8');
+}
+app.use('/api/client-updates', express.static(clientUpdateDirectory, {
+  dotfiles: 'deny', index: false, fallthrough: false, maxAge: 0,
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store, max-age=0'),
+}));
+
 app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
 });
@@ -386,6 +403,77 @@ app.post('/api/auth/google/exchange', async (req, res) => {
   }
 });
 
+app.post('/api/auth/microsoft/exchange', async (req, res) => {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const { code, codeVerifier, redirectUri, offlineProfileId, offlineUsername } = req.body || {};
+  if (!clientId) return res.status(503).json({ error: 'Microsoft sign-in is not configured on the Bayon server.' });
+  if (typeof code !== 'string' || code.length > 4096 || typeof codeVerifier !== 'string'
+      || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier) || typeof redirectUri !== 'string') {
+    return res.status(400).json({ error: 'Microsoft sign-in did not return a valid authorization response.' });
+  }
+  let callback;
+  try { callback = new URL(redirectUri); } catch { return res.status(400).json({ error: 'Invalid Microsoft sign-in callback.' }); }
+  if (callback.protocol !== 'http:' || callback.hostname !== 'localhost'
+      || callback.pathname !== '/' || !Number(callback.port)
+      || (offlineProfileId !== undefined && (typeof offlineProfileId !== 'string' || offlineProfileId.length < 8 || offlineProfileId.length > 100))
+      || (offlineUsername !== undefined && (typeof offlineUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(offlineUsername)))
+      || (offlineProfileId && !offlineUsername) || (!offlineProfileId && offlineUsername)) {
+    return res.status(400).json({ error: 'Microsoft sign-in callback or offline profile is invalid.' });
+  }
+
+  let tokenData;
+  try {
+    const response = await fetch('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: codeVerifier, scope: 'openid profile email User.Read' }),
+      signal: AbortSignal.timeout(12000),
+    });
+    tokenData = await response.json();
+    if (!response.ok || !tokenData.access_token) return res.status(401).json({ error: 'Microsoft could not complete sign-in. Check the app registration and try again.' });
+  } catch { return res.status(502).json({ error: 'Could not reach Microsoft sign-in.' }); }
+
+  let profile;
+  try {
+    const response = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return res.status(401).json({ error: 'Microsoft did not provide a valid account profile.' });
+    profile = await response.json();
+  } catch { return res.status(502).json({ error: 'Could not read the Microsoft account profile.' }); }
+  if (typeof profile.id !== 'string' || !profile.id) return res.status(401).json({ error: 'Microsoft account ID is missing.' });
+
+  const email = typeof profile.mail === 'string' && profile.mail.includes('@') ? profile.mail.trim().toLowerCase()
+    : typeof profile.userPrincipalName === 'string' && profile.userPrincipalName.includes('@') ? profile.userPrincipalName.trim().toLowerCase() : '';
+  let user = db.users.find((candidate) => candidate.microsoftSubject === profile.id);
+  // Preserve a beta balance when its owner signs into Microsoft from the same
+  // locally saved offline profile, while leaving already-authenticated users alone.
+  if (!user && offlineProfileId) {
+    user = db.users.find((candidate) => !candidate.microsoftSubject && !candidate.googleSubject
+      && !candidate.emailVerifiedAt && !candidate.passwordHash
+      && candidate.linkedOfflineProfiles?.some((linked) => linked.id === offlineProfileId));
+  }
+  if (!user) {
+    const base = `m_${crypto.createHash('sha256').update(profile.id).digest('hex').slice(0, 10)}`;
+    let username = base;
+    let suffix = 1;
+    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
+    user = { id: `user-${crypto.randomUUID()}`, username, status: 'online', createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
+    db.users.push(user);
+  }
+  user.microsoftSubject = profile.id;
+  if (email) user.microsoftEmail = email;
+  if (offlineProfileId) {
+    try { linkOfflineProfileToUser(user, offlineProfileId, offlineUsername); }
+    catch (error) { return res.status(409).json({ error: error.message || 'Could not connect this offline profile.' }); }
+  }
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  user.ownedCosmetics ??= [];
+  user.status = 'online';
+  saveDb(db);
+  res.json({ token: jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' }), user: publicBayonUser(user) });
+});
+
 function authenticatedUser(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in to your Bayon account first.' });
@@ -418,50 +506,6 @@ app.post('/api/auth/offline-profile', authenticatedUser, (req, res) => {
   } catch (err) {
     res.status(409).json({ error: err.message || 'Could not connect this offline profile.' });
   }
-});
-
-app.post('/api/auth/bacoins/beta', (req, res) => {
-  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
-  const profileId = req.body?.profileId;
-  const profileUsername = req.body?.username;
-  if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) return res.status(400).json({ error: 'Select a valid offline Minecraft profile first.' });
-  let user = db.users.find((candidate) => candidate.linkedOfflineProfiles?.some((profile) => profile.id === profileId));
-  if (!user) {
-    const base = `b_${crypto.createHash('sha256').update(profileId).digest('hex').slice(0, 10)}`;
-    let username = base;
-    let suffix = 1;
-    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
-    user = { id: `user-${crypto.randomUUID()}`, username, status: 'online', avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(profileUsername)}`, createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
-    db.users.push(user);
-  }
-  try { linkOfflineProfileToUser(user, profileId, profileUsername); }
-  catch (error) { return res.status(409).json({ error: error.message || 'Could not create a beta Bacoins account.' }); }
-  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
-  user.ownedCosmetics ??= [];
-  user.status = 'online';
-  saveDb(db);
-  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, betaMode: true, token, user: publicBayonUser(user) });
-});
-
-app.post('/api/auth/bacoins/beta/pairing-code', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
-  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
-  const code = `BAYON-LINK-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  db.betaPairingCodes ??= [];
-  db.betaPairingCodes = db.betaPairingCodes.filter((item) => Date.parse(item.expiresAt) > Date.now());
-  db.betaPairingCodes.push({ codeHash: crypto.createHash('sha256').update(code).digest('hex'), userId: req.bayonUser.id, expiresAt });
-  saveDb(db);
-  res.json({ code, expiresAt });
-});
-
-app.put('/api/auth/bacoins/beta/contact-email', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
-  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : null;
-  if (email === null || email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return res.status(400).json({ error: 'Enter a valid email address or leave the field blank.' });
-  req.bayonUser.betaContactEmail = email || null;
-  saveDb(db);
-  res.json({ contactEmail: req.bayonUser.betaContactEmail });
 });
 
 app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile, async (req, res) => {
@@ -500,33 +544,6 @@ app.post('/api/store/redeem', authenticatedUser, (req, res) => {
   req.bayonUser.bacoins += amount;
   saveDb(db);
   res.json({ user: publicBayonUser(req.bayonUser), credited: amount });
-});
-
-app.post('/api/store/auth/pair', (req, res) => {
-  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const attempts = storePairAttempts.get(clientIp) || { count: 0, resetAt: now + 15 * 60 * 1000 };
-  if (attempts.resetAt <= now) { attempts.count = 0; attempts.resetAt = now + 15 * 60 * 1000; }
-  attempts.count += 1;
-  storePairAttempts.set(clientIp, attempts);
-  if (attempts.count > 15) return res.status(429).json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' });
-  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  if (!/^BAYON-LINK-[A-F0-9]{24}$/.test(code)) return res.status(400).json({ error: 'Enter the website sign-in code shown in Bayon Client.' });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter the email saved in Bayon Client.' });
-  db.betaPairingCodes ??= [];
-  const hash = crypto.createHash('sha256').update(code).digest('hex');
-  const index = db.betaPairingCodes.findIndex((item) => item.codeHash === hash && Date.parse(item.expiresAt) > Date.now());
-  if (index < 0) return res.status(400).json({ error: 'That code is invalid, expired, or already used. Generate a new one in Bayon Client.' });
-  const pairing = db.betaPairingCodes[index];
-  const user = db.users.find((candidate) => candidate.id === pairing.userId);
-  if (!user) { saveDb(db); return res.status(404).json({ error: 'Bayon account not found.' }); }
-  if (!user.betaContactEmail || user.betaContactEmail.toLowerCase() !== email) return res.status(401).json({ error: 'That email does not match the one saved for this Bayon profile.' });
-  db.betaPairingCodes.splice(index, 1);
-  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
-  user.ownedCosmetics ??= [];
-  saveDb(db);
-  res.json({ token: jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' }), user: publicBayonUser(user) });
 });
 
 app.post('/api/store/auth/microsoft', async (req, res) => {
@@ -593,6 +610,118 @@ function requireAdmin(req, res, next) {
     next();
   } catch { res.status(401).json({ error: 'Admin sign-in required.' }); }
 }
+
+app.get('/api/admin/client-updates', requireAdmin, (_req, res) => {
+  try {
+    const currentPath = path.join(clientUpdateDirectory, 'current.json');
+    const current = fs.existsSync(currentPath) ? JSON.parse(fs.readFileSync(currentPath, 'utf8')) : null;
+    res.json({ current, baseVersion: initialUpdateVersion });
+  } catch {
+    res.status(500).json({ error: 'Could not read the current client update.' });
+  }
+});
+
+function compareClientVersions(left, right) {
+  const [leftCore, leftPrerelease] = left.split('-', 2);
+  const [rightCore, rightPrerelease] = right.split('-', 2);
+  const leftNumbers = leftCore.split('.').map(Number);
+  const rightNumbers = rightCore.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftNumbers[index] !== rightNumbers[index]) return leftNumbers[index] - rightNumbers[index];
+  }
+  if (leftPrerelease === rightPrerelease) return 0;
+  if (leftPrerelease === undefined) return 1;
+  if (rightPrerelease === undefined) return -1;
+  return leftPrerelease.localeCompare(rightPrerelease, undefined, { numeric: true });
+}
+
+app.post('/api/admin/client-updates/upload', requireAdmin, (req, res) => {
+  const { version, fileName, size } = req.body || {};
+  const bytes = Number(size);
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version) || version.length > 48) return res.status(400).json({ error: 'Enter a valid client version such as 1.0.2.' });
+  if (typeof fileName !== 'string' || !/\.exe$/i.test(fileName) || !Number.isSafeInteger(bytes) || bytes < 2 || bytes > clientUpdateMaxSize) return res.status(400).json({ error: 'Choose a Windows installer .exe smaller than 1 GB.' });
+  let installedReleaseVersion = initialUpdateVersion;
+  try { installedReleaseVersion = JSON.parse(fs.readFileSync(path.join(clientUpdateDirectory, 'current.json'), 'utf8')).version || initialUpdateVersion; } catch {}
+  if (compareClientVersions(version, installedReleaseVersion) <= 0) return res.status(400).json({ error: `Version ${version} must be newer than the current release ${installedReleaseVersion}.` });
+  const uploadId = crypto.randomBytes(18).toString('hex');
+  const totalChunks = Math.ceil(bytes / clientUpdateChunkSize);
+  const directory = path.join(clientUpdateIncomingDirectory, uploadId);
+  fs.mkdirSync(directory, { recursive: true });
+  clientUpdateUploadSessions.set(uploadId, { version, size: bytes, totalChunks, directory, startedAt: Date.now() });
+  res.status(201).json({ uploadId, chunkSize: clientUpdateChunkSize, totalChunks });
+});
+
+app.put('/api/admin/client-updates/upload/:uploadId/:chunkIndex', requireAdmin, express.raw({ type: 'application/octet-stream', limit: clientUpdateChunkSize }), (req, res) => {
+  const { uploadId } = req.params;
+  const session = clientUpdateUploadSessions.get(uploadId);
+  const indexText = req.params.chunkIndex;
+  const index = Number(indexText);
+  if (!/^[a-f0-9]{36}$/.test(uploadId) || !session || !/^\d+$/.test(indexText) || !Number.isInteger(index) || index < 0 || index >= session.totalChunks) return res.status(404).json({ error: 'Upload session not found. Start the upload again.' });
+  if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'Upload chunk is empty.' });
+  const expectedSize = Math.min(clientUpdateChunkSize, session.size - index * clientUpdateChunkSize);
+  if (req.body.length !== expectedSize) return res.status(400).json({ error: 'Upload chunk size did not match.' });
+  try {
+    fs.writeFileSync(path.join(session.directory, `${index}.part`), req.body, { flag: 'wx' });
+    res.status(201).json({ success: true, index });
+  } catch (error) {
+    res.status(error.code === 'EEXIST' ? 409 : 500).json({ error: error.code === 'EEXIST' ? 'This upload chunk was already received.' : 'Could not save the upload chunk.' });
+  }
+});
+
+app.post('/api/admin/client-updates/upload/:uploadId/finish', requireAdmin, async (req, res) => {
+  const { uploadId } = req.params;
+  const session = clientUpdateUploadSessions.get(uploadId);
+  if (!/^[a-f0-9]{36}$/.test(uploadId) || !session) return res.status(404).json({ error: 'Upload session not found. Start the upload again.' });
+  const fileName = `Bayon-Client-Setup-${session.version}.exe`;
+  const tempPath = path.join(clientUpdateDirectory, `.${fileName}.${uploadId}.tmp`);
+  const filePath = path.join(clientUpdateDirectory, fileName);
+  try {
+    for (let index = 0; index < session.totalChunks; index += 1) {
+      const chunkPath = path.join(session.directory, `${index}.part`);
+      const expectedSize = Math.min(clientUpdateChunkSize, session.size - index * clientUpdateChunkSize);
+      if (!fs.existsSync(chunkPath) || fs.statSync(chunkPath).size !== expectedSize) return res.status(400).json({ error: `Upload chunk ${index + 1} is missing or incomplete.` });
+    }
+    const chunkStream = Readable.from((async function* streamChunks() {
+      for (let index = 0; index < session.totalChunks; index += 1) {
+        for await (const chunk of fs.createReadStream(path.join(session.directory, `${index}.part`))) yield chunk;
+      }
+    })());
+    await pipeline(chunkStream, fs.createWriteStream(tempPath, { flags: 'wx' }));
+    const signature = Buffer.alloc(2);
+    const descriptor = fs.openSync(tempPath, 'r');
+    try { fs.readSync(descriptor, signature, 0, 2, 0); } finally { fs.closeSync(descriptor); }
+    if (fs.statSync(tempPath).size !== session.size || signature.toString('ascii') !== 'MZ') throw new Error('The upload is not a valid Windows .exe installer.');
+    const hash = crypto.createHash('sha512');
+    for await (const chunk of fs.createReadStream(tempPath)) hash.update(chunk);
+    const sha512 = hash.digest('base64');
+    fs.renameSync(tempPath, filePath);
+    const releaseDate = new Date().toISOString();
+    const latestManifest = [
+      `version: ${session.version}`,
+      'files:',
+      `  - url: ${fileName}`,
+      `    sha512: ${sha512}`,
+      `    size: ${session.size}`,
+      `path: ${fileName}`,
+      `sha512: ${sha512}`,
+      `releaseDate: ${releaseDate}`,
+      '',
+    ].join('\n');
+    const manifestTemp = path.join(clientUpdateDirectory, `.latest.${uploadId}.tmp`);
+    fs.writeFileSync(manifestTemp, latestManifest, { flag: 'wx' });
+    fs.renameSync(manifestTemp, path.join(clientUpdateDirectory, 'latest.yml'));
+    const current = { version: session.version, fileName, size: session.size, sha512, releaseDate };
+    const currentTemp = path.join(clientUpdateDirectory, `.current.${uploadId}.tmp`);
+    fs.writeFileSync(currentTemp, JSON.stringify(current, null, 2), { flag: 'wx' });
+    fs.renameSync(currentTemp, path.join(clientUpdateDirectory, 'current.json'));
+    fs.rmSync(session.directory, { recursive: true, force: true });
+    clientUpdateUploadSessions.delete(uploadId);
+    res.status(201).json({ success: true, current });
+  } catch (error) {
+    try { fs.rmSync(tempPath, { force: true }); } catch {}
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Could not publish this client update.' });
+  }
+});
 
 app.post('/api/admin/session', (req, res) => {
   const supplied = typeof req.body?.secret === 'string' ? Buffer.from(req.body.secret) : Buffer.alloc(0);
@@ -682,7 +811,7 @@ app.post('/api/admin/assets', requireAdmin, (req, res) => {
 });
 
 if (adminPanelPath) {
-  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/cosmetic', '/cosmatic'];
+  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/client-updates', '/upload-client-update', '/cosmetic', '/cosmatic'];
   app.get([adminPanelPath, ...adminPages.map((page) => `${adminPanelPath}${page}`)], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 } else {
   app.get('/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));

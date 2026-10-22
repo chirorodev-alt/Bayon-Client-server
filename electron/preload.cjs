@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkForAppUpdate: () => ipcRenderer.invoke('app-update:check'),
   installAppUpdate: () => ipcRenderer.invoke('app-update:install'),
   startGoogleOAuth: (clientId) => ipcRenderer.invoke('auth:google-start', clientId),
+  startMicrosoftOAuth: (clientId) => ipcRenderer.invoke('auth:microsoft-start', clientId),
   onAppUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('app-update:state', listener);
@@ -36,6 +37,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openModProject: (source, projectUrl) => ipcRenderer.invoke('mods:open-project', source, projectUrl),
   hasCurseForgeKey: () => ipcRenderer.invoke('mods:curseforge-key-available'),
   getInstalledMods: (profileId) => ipcRenderer.invoke('mods:get-installed', profileId),
+  getBayonModStatus: (profileId) => ipcRenderer.invoke('mods:bayon-status', profileId),
+  installBayonMod: (profileId) => ipcRenderer.invoke('mods:bayon-install', profileId),
+  uninstallBayonMod: (profileId) => ipcRenderer.invoke('mods:bayon-uninstall', profileId),
   installModrinthMod: (payload) => ipcRenderer.invoke('mods:install-modrinth', payload),
   toggleMod: (id, enabled, profileId) => ipcRenderer.invoke('mods:toggle', id, enabled, profileId),
   uninstallMod: (id, profileId) => ipcRenderer.invoke('mods:uninstall', id, profileId),
@@ -47,7 +51,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('launch:progress', listener);
   },
   getDiscordPresenceStatus: () => ipcRenderer.invoke('discord:presence-status'),
-  configureDiscordPresence: (clientId) => ipcRenderer.invoke('discord:configure-presence', clientId),
+  getDiscordPresenceConfig: () => ipcRenderer.invoke('discord:presence-config'),
+  configureDiscordPresence: () => ipcRenderer.invoke('discord:configure-presence'),
   reconnectDiscordPresence: () => ipcRenderer.invoke('discord:reconnect-presence'),
   updateDiscordActivity: (activity) => ipcRenderer.invoke('discord:update-activity', activity),
   disableDiscordPresence: () => ipcRenderer.invoke('discord:disable-presence'),

@@ -61,6 +61,16 @@ export type InstallModrinthPayload = {
   worldName?: string;
 };
 
+export type BayonModStatus = {
+  available: boolean;
+  installed: boolean;
+  version: string | null;
+  gameVersion?: string;
+  installedVersion?: string | null;
+  filename?: string | null;
+  error?: string;
+};
+
 export type LaunchOptions = {
   version: string;
   loader: string;
@@ -137,11 +147,15 @@ declare global {
       checkForAppUpdate: () => Promise<AppUpdateState>;
       installAppUpdate: () => Promise<boolean>;
       startGoogleOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;
+      startMicrosoftOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;
       onAppUpdateState: (callback: (state: AppUpdateState) => void) => () => void;
       onJavaRuntimeProgress: (callback: (data: JavaRuntimeProgress) => void) => () => void;
       openModProject: (source: ModCatalogSource, projectUrl: string) => Promise<void>;
       hasCurseForgeKey: () => Promise<boolean>;
       getInstalledMods: (profileId?: string) => Promise<InstalledMod[]>;
+      getBayonModStatus: (profileId?: string) => Promise<BayonModStatus>;
+      installBayonMod: (profileId?: string) => Promise<BayonModStatus>;
+      uninstallBayonMod: (profileId?: string) => Promise<BayonModStatus>;
       installModrinthMod: (payload: InstallModrinthPayload) => Promise<InstalledMod[]>;
       toggleMod: (id: string, enabled: boolean, profileId?: string) => Promise<InstalledMod[]>;
       uninstallMod: (id: string, profileId?: string) => Promise<InstalledMod[]>;
@@ -149,7 +163,8 @@ declare global {
       launchMinecraft: (options: LaunchOptions) => Promise<{ success: boolean }>;
       onLaunchProgress: (callback: (data: LaunchProgressData) => void) => () => void;
       getDiscordPresenceStatus: () => Promise<DiscordPresenceStatus>;
-      configureDiscordPresence: (clientId: string) => Promise<DiscordPresenceStatus>;
+      getDiscordPresenceConfig: () => Promise<{ clientId: string | null }>;
+      configureDiscordPresence: () => Promise<DiscordPresenceStatus>;
       reconnectDiscordPresence: () => Promise<DiscordPresenceStatus>;
       updateDiscordActivity: (activity: DiscordActivityPayload) => Promise<DiscordPresenceStatus>;
       disableDiscordPresence: () => Promise<DiscordPresenceStatus>;

@@ -11,7 +11,6 @@ const initialData = {
   friends: [],
   redeemCodes: [],
   cosmetics: [],
-  betaPairingCodes: [],
   adminBacoinsAdjustments: [],
 };
 
@@ -34,7 +33,7 @@ export function loadDb() {
     data.friends ??= [];
     data.redeemCodes ??= [];
     data.cosmetics ??= [];
-    data.betaPairingCodes ??= [];
+    delete data.betaPairingCodes;
     data.adminBacoinsAdjustments ??= [];
     return data;
   } catch (err) {

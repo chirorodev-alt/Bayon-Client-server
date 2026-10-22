@@ -12,6 +12,10 @@ dist
 dist-ssr
 release
 *.local
+/fabric-mod/.gradle-user/
+/fabric-mod/.gradle/
+/fabric-mod/build/
+/fabric-mod/bin/
 
 # Editor directories and files
 .vscode/*

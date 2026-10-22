@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "bayonclient",
+  "version": "${version}",
+  "name": "Bayon Client",
+  "description": "A lightweight, configurable monochrome HUD for Bayon Client.",
+  "authors": ["Bayon Client"],
+  "contact": {
+    "homepage": "https://bayon-client-server.onrender.com"
+  },
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.bayon.client.BayonClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "${minecraft_version}",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

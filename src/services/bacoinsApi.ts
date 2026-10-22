@@ -45,31 +45,30 @@ export function getGoogleClientId() {
   return request<{ clientId: string | null }>('/api/auth/google/config', {}, false).then((result) => result.clientId);
 }
 
-export async function betaBacoinsSignIn(profileId: string, profileUsername: string) {
-  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/bacoins/beta', {
-    method: 'POST', body: JSON.stringify({ profileId, username: profileUsername }),
+export function getMicrosoftClientId() {
+  return request<{ clientId: string | null }>('/api/auth/microsoft/config', {}, false).then((result) => result.clientId);
+}
+
+export async function authenticateWithMicrosoft(clientId: string, profile?: { id: string; username: string }) {
+  if (!window.electronAPI?.startMicrosoftOAuth) throw new Error('Microsoft sign-in is available in the Bayon desktop app.');
+  const authorization = await window.electronAPI.startMicrosoftOAuth(clientId);
+  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/microsoft/exchange', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...authorization,
+      offlineProfileId: profile?.id,
+      offlineUsername: profile?.username,
+    }),
   }, false);
   localStorage.setItem(TOKEN_KEY, result.token);
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ username: result.user.username, contactEmail: result.user.betaContactEmail, betaMode: true }));
-  window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
+  saveBacoinsIdentity(result.user);
   return result.user;
 }
 
-export function createBacoinsPairingCode(profileId: string) {
-  return request<{ code: string; expiresAt: string }>('/api/auth/bacoins/beta/pairing-code', {
-    method: 'POST', headers: { 'X-Bayon-Offline-Profile': profileId },
-  });
-}
-
-export function saveBacoinsContactEmail(profileId: string, email: string) {
-  return request<{ contactEmail: string | null }>('/api/auth/bacoins/beta/contact-email', {
-    method: 'PUT', body: JSON.stringify({ email }), headers: { 'X-Bayon-Offline-Profile': profileId },
-  }).then((result) => {
-    const identity = getBacoinsIdentity();
-    if (identity) localStorage.setItem(IDENTITY_KEY, JSON.stringify({ ...identity, contactEmail: result.contactEmail || undefined }));
-    window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
-    return result;
-  });
+export async function signInWithMicrosoft(profile?: { id: string; username: string }) {
+  const clientId = await getMicrosoftClientId();
+  if (!clientId) throw new Error('Microsoft sign-in is not configured on the Bayon server yet.');
+  return authenticateWithMicrosoft(clientId, profile);
 }
 
 export async function authenticateBacoins(path: '/api/auth/register' | '/api/auth/login', username: string, password: string) {

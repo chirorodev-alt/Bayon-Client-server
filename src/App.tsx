@@ -20,8 +20,10 @@ import {
   ImagePlus,
   KeyRound,
   Layers3,
+  Mail,
   Minus,
   Monitor,
+  MoreHorizontal,
   MoonStar,
   Play,
   Plus,
@@ -42,15 +44,16 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
-import { betaBacoinsSignIn, clearBacoinsToken, createBacoinsPairingCode, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, saveBacoinsContactEmail, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
+import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, signInWithMicrosoft, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
-import type { AppUpdateState, ClientDirectories, DiscordPresenceStatus, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
+import type { AppUpdateState, BayonModStatus, ClientDirectories, DiscordPresenceStatus, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
 import bayonIcon from './assets/bayon-icon.png';
 
 const SkinModelPreview = lazy(() => import('./components/SkinModelPreview').then((module) => ({ default: module.SkinModelPreview })));
@@ -73,7 +76,12 @@ const navItems: NavItem[] = [
   { to: '/skins', label: 'Skins', icon: Shirt },
 ];
 
-const versions = ['26.3'];
+const navigationLabels = {
+  English: ['Play', 'Profiles', 'Accounts', 'Store', 'Settings', 'Mods', 'Skins'],
+  Khmer: ['លេង', 'ប្រវត្តិរូប', 'គណនី', 'ហាង', 'ការកំណត់', 'មូដ', 'ស្បែក'],
+} as const;
+
+const versions = ['26.3', '26.2'];
 const modContentTabs: { id: ModrinthProjectType; label: string }[] = [
   { id: 'mod', label: 'Mods' },
   { id: 'modpack', label: 'Modpacks' },
@@ -96,7 +104,7 @@ function useMinecraftVersions() {
           return (manifest.versions ?? []).filter((version) => version.type === 'release').map((version) => version.id);
         });
       minecraftVersionsRequest = request
-        .then((items) => ['26.3', ...items].filter((item, index, list) => list.indexOf(item) === index))
+        .then((items) => ['26.3', '26.2', ...items].filter((item, index, list) => list.indexOf(item) === index))
         .catch(() => versions);
     }
     void minecraftVersionsRequest.then((items) => { if (active) setAvailableVersions(items); });
@@ -145,6 +153,7 @@ function AppShell() {
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const location = useLocation();
+  const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const discordPresence = useSettingsStore((state) => state.discordPresence);
 
@@ -162,6 +171,16 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+    if (discordPresence) {
+      void api.configureDiscordPresence().catch(() => {});
+    } else {
+      void api.disableDiscordPresence().catch(() => {});
+    }
+  }, [discordPresence]);
+
+  useEffect(() => {
     if (discordPresence) {
       void window.electronAPI?.updateDiscordActivity({
         page: location.pathname === '/' ? '/home' : location.pathname,
@@ -177,7 +196,7 @@ function AppShell() {
     && (appUpdate.status === 'downloaded' || dismissedUpdate !== updateDismissKey);
 
   return (
-    <div className="app-shell bg-[#080a0d] text-white selection:bg-white/20">
+    <div className="app-shell bg-[#080a0d] text-white selection:bg-white/20" lang={language === 'Khmer' ? 'km' : 'en'}>
       <div className="app-frame border border-white/10 bg-[#080b0f]">
         <TitleBar windowState={windowState} />
         <div className="app-body">
@@ -222,18 +241,18 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [editionOpen, setEditionOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
   const [betaBusy, setBetaBusy] = useState(false);
   const [betaNotice, setBetaNotice] = useState('');
-  const [websitePairingCode, setWebsitePairingCode] = useState('');
   const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
-  const [betaContactEmail, setBetaContactEmail] = useState(bacoinsIdentity?.contactEmail ?? '');
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
+  const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
+  const setLanguage = useSettingsStore((state) => state.setLanguage);
 
   useEffect(() => {
     const refreshIdentity = () => {
       const identity = getBacoinsIdentity();
       setBacoinsIdentity(identity);
-      setBetaContactEmail(identity?.contactEmail ?? '');
     };
     const openBacoinsMenu = () => { setEditionOpen(true); setBetaNotice(''); };
     window.addEventListener('bayon:bacoins-auth-changed', refreshIdentity);
@@ -244,37 +263,13 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
     };
   }, []);
 
-  const enableBetaBacoins = async () => {
-    if (!activeAccount) { setBetaNotice('Select an offline Minecraft profile first.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(betaContactEmail.trim())) { setBetaNotice('Enter a valid email address first.'); return; }
+  const signInBacoins = async () => {
     setBetaBusy(true); setBetaNotice('');
     try {
-      await betaBacoinsSignIn(activeAccount.id, activeAccount.username);
-      await saveBacoinsContactEmail(activeAccount.id, betaContactEmail.trim());
-      setBacoinsIdentity(getBacoinsIdentity()); setBetaNotice('Confirmed. Your email is saved and beta Bacoins is signed in.');
-    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not enable beta Bacoins.'); }
-    finally { setBetaBusy(false); }
-  };
-
-  const generateWebsiteCode = async () => {
-    if (!activeAccount) { setBetaNotice('Select the offline profile connected to your Bacoins account.'); return; }
-    setBetaBusy(true); setBetaNotice(''); setWebsitePairingCode('');
-    try {
-      const result = await createBacoinsPairingCode(activeAccount.id);
-      setWebsitePairingCode(result.code);
-      setBetaNotice(`Code expires at ${new Date(result.expiresAt).toLocaleTimeString()}. Use it once on the Bayon Store website.`);
-    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not generate a website sign-in code.'); }
-    finally { setBetaBusy(false); }
-  };
-
-  const saveBetaEmail = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!activeAccount) { setBetaNotice('Select the offline profile connected to this Bacoins account.'); return; }
-    setBetaBusy(true); setBetaNotice('');
-    try {
-      await saveBacoinsContactEmail(activeAccount.id, betaContactEmail);
-      setBetaNotice('Email saved without verification. It is not used to sign in or recover your account.');
-    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not save your email.'); }
+      await signInWithMicrosoft(activeAccount ? { id: activeAccount.id, username: activeAccount.username } : undefined);
+      setBacoinsIdentity(getBacoinsIdentity());
+      setBetaNotice('Microsoft account connected. Your Bayon balance is ready to sync.');
+    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not sign in with Microsoft.'); }
     finally { setBetaBusy(false); }
   };
 
@@ -284,7 +279,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         <LogoMark />
         <div>
           <div className="title-wordmark">BAYON CLIENT</div>
-          <div className="title-tagline">PLAY / CUSTOMIZE / BE DIFFERENT</div>
+          <div className="title-tagline">{language === 'Khmer' ? 'លេង / កែសម្រួល / ប្លែកពីគេ' : 'PLAY / CUSTOMIZE / BE DIFFERENT'}</div>
         </div>
       </div>
 
@@ -298,33 +293,35 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
           {accountOpen && <div className="title-popover"><strong>{activeAccount?.username ?? 'No account selected'}</strong><span>{activeAccount ? 'Offline account' : 'Create an offline account to continue'}</span><NavLink to="/accounts" onClick={() => setAccountOpen(false)}>Manage accounts</NavLink></div>}
         </div>
         <div className="title-dropdown-wrap">
+          <button type="button" className="title-select language-select" onClick={() => setLanguageOpen(!languageOpen)} aria-label="Choose language" aria-expanded={languageOpen}>
+            <span className="language-flag" aria-hidden="true">{language === 'Khmer' ? '🇰🇭' : '🇬🇧'}</span>
+            <span className="language-select-label">{language === 'Khmer' ? 'ខ្មែរ' : 'English'}</span>
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          {languageOpen && <div className="title-popover language-popover" role="menu" aria-label="Language">
+            <strong>Language / ភាសា</strong>
+            <button type="button" role="menuitemradio" aria-checked={language === 'English'} className={language === 'English' ? 'language-option-active' : ''} onClick={() => { setLanguage('English'); setLanguageOpen(false); }}><span aria-hidden="true">🇬🇧</span> English {language === 'English' && <Check className="h-3.5 w-3.5" />}</button>
+            <button type="button" role="menuitemradio" aria-checked={language === 'Khmer'} className={language === 'Khmer' ? 'language-option-active' : ''} onClick={() => { setLanguage('Khmer'); setLanguageOpen(false); }}><span aria-hidden="true">🇰🇭</span> ខ្មែរ (Khmer) {language === 'Khmer' && <Check className="h-3.5 w-3.5" />}</button>
+          </div>}
+        </div>
+        <div className="title-dropdown-wrap">
           <button type="button" className="title-select edition-select" onClick={() => setEditionOpen(!editionOpen)}>
             <span className="edition-cube"><KeyRound className="h-3.5 w-3.5" /></span>
-            <span className="title-select-copy"><strong>Bacoins Beta</strong><small>Test account</small></span>
+            <span className="title-select-copy"><strong>{bacoinsIdentity?.email ? 'Microsoft account' : 'Bayon account'}</strong><small>{bacoinsIdentity?.email || 'Bacoins sign-in'}</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
           {editionOpen && <div className="title-popover email-auth-popover">
-            <strong>Beta Bacoins</strong>
+            <strong>Bayon account</strong>
             {bacoinsIdentity ? <>
-              <span>Signed in as {bacoinsIdentity.email || bacoinsIdentity.username || activeAccount?.username}</span>
-              <span>This beta balance is connected to your selected offline profile.</span>
-              <form onSubmit={(event) => void saveBetaEmail(event)}>
-                <label htmlFor="beta-contact-email">Email address</label>
-                <input id="beta-contact-email" type="email" autoComplete="email" value={betaContactEmail} onChange={(event) => setBetaContactEmail(event.target.value)} placeholder="you@example.com" />
-                <button type="submit" disabled={betaBusy}>{betaBusy ? 'Saving…' : betaContactEmail ? 'Save email' : 'Add email'}</button>
-                <small>Unverified contact info only. No email is sent; this address cannot sign in or recover the account.</small>
-              </form>
-              <button type="button" onClick={() => void generateWebsiteCode()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Generating…' : 'Generate website sign-in code'}</button>
-              {websitePairingCode && <><code className="email-auth-notice" style={{ userSelect: 'text', fontSize: 13, letterSpacing: 1 }}>{websitePairingCode}</code><button type="button" onClick={() => { void (async () => { try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(websitePairingCode); setBetaNotice('Code copied. It can be used once before it expires.'); } catch { setBetaNotice('Copy failed. Select and copy the code above.'); } })(); }}>Copy code</button></>}
+              <span>Signed in as {bacoinsIdentity.email || bacoinsIdentity.username}</span>
+              <span>Your Microsoft identity is used to sync Bacoins with the website.</span>
               {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
               <button type="button" onClick={() => { clearBacoinsToken(); setBacoinsIdentity(null); setBetaNotice(''); }}>Sign out</button>
             </> : <>
-              <span>Connect Bacoins to offline profile <strong>{activeAccount?.username ?? 'not selected'}</strong>.</span>
-              <label htmlFor="beta-contact-email">Email address</label>
-              <input id="beta-contact-email" type="email" autoComplete="email" value={betaContactEmail} onChange={(event) => setBetaContactEmail(event.target.value)} placeholder="you@example.com" required />
-              <button type="button" onClick={() => void enableBetaBacoins()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Connecting…' : 'Confirm and enable'}</button>
+              <span>Sign in with Microsoft to sync Bacoins{activeAccount ? <> for <strong>{activeAccount.username}</strong></> : ''}.</span>
+              <button type="button" onClick={() => void signInBacoins()} disabled={betaBusy}>{betaBusy ? 'Connecting…' : 'Continue with Microsoft'}</button>
               {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
-              <small>No verification email is sent. The address is saved as unverified contact info; sign-in stays tied to this offline profile.</small>
+              <small>Email-only offline profiles remain local. Add a contact email in Accounts; Microsoft sign-in secures your synced balance.</small>
             </>}
           </div>}
         </div>
@@ -344,6 +341,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
 
 function Sidebar() {
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
+  const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   return (
     <aside className="sidebar">
       <nav className="sidebar-nav">
@@ -358,7 +356,7 @@ function Sidebar() {
             {() => (
               <>
                 <Icon className="h-[18px] w-[18px]" />
-                <span>{label}</span>
+                <span>{navigationLabels[language][index] ?? label}</span>
               </>
             )}
           </NavLink>
@@ -504,7 +502,17 @@ function HomePage() {
             </div>)}
             <button type="button" className="home-profile-add" onClick={() => navigate('/profiles?create=1')}><Plus className="h-5 w-5" /><span>Add a Profile</span></button>
           </div>
-          <div className="dashboard-avatar" aria-hidden="true"><div className="pixel-head" /><div className="pixel-body">B</div><div className="pixel-legs" /></div>
+          <div className="dashboard-avatar" aria-label={`${activeAccount?.username ?? 'Steve'} Minecraft skin`}>
+            <div className="skin-aura skin-aura-back" />
+            <div className="skin-aura skin-aura-flame" />
+            <div className="skin-aura skin-aura-orbit" />
+            <div className="skin-aura skin-aura-core" />
+            <div className="home-skin-preview">
+              <Suspense fallback={<MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="home-skin-fallback" />}>
+                <SkinModelPreview imageUrl={activeAccount?.skin?.imageUrl} skinName={activeAccount?.skin?.name ?? 'Default'} rotation={0} slimArms={false} onRotationChange={() => {}} autoRotate flightPose />
+              </Suspense>
+            </div>
+          </div>
         </div>
 
         <section className="news-section">
@@ -523,9 +531,6 @@ function HomePage() {
       </section>
 
       <aside className="dashboard-rail">
-        <section className="rail-panel discord-panel">
-          <DiscordPresenceCard />
-        </section>
         <button type="button" className="rail-panel store-panel" onClick={() => navigate('/store')}><ShoppingCart className="h-6 w-6" /><span><strong>Store</strong><small>Bacoins &amp; Cosmetics</small></span><ChevronRight className="ml-auto h-4 w-4" /></button>
         <section className="rail-panel servers-panel">
           <div className="rail-heading"><h2>Partner Servers</h2></div>
@@ -734,7 +739,7 @@ function StorePage() {
   };
 
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><PageHeader title="Bacoins Store" subtitle="Redeem Bacoins and customize your Bayon profile." />
         {user && <div className="flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3"><Coins className="h-5 w-5 text-amber-200" /><div><small className="block text-[10px] uppercase tracking-widest text-white/45">Your balance</small><strong className="text-lg">{user.bacoins.toLocaleString()} Bacoins</strong></div></div>}
       </div>
@@ -743,7 +748,7 @@ function StorePage() {
       {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
 
       {!signedIn ? <GlassCard className="mb-5 flex flex-wrap items-center justify-between gap-5 p-5">
-        <div><h2 className="font-semibold">Connect Bayon Client</h2><p className="mt-1 text-xs text-white/45">Enable beta Bacoins from the top-right menu. Generate a one-time code there to sign in to the website.</p></div>
+        <div><h2 className="font-semibold">Connect Bayon Client</h2><p className="mt-1 text-xs text-white/45">Sign in with the same Microsoft account in Bayon Client and the website to sync Bacoins and cosmetics.</p></div>
         <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-bacoins-menu'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open beta Bacoins</button>
       </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
         <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
@@ -786,11 +791,16 @@ function ProfilesPage() {
   };
 
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-6xl">
       <div className="mb-6 flex items-center justify-between gap-4"><PageHeader title="Profiles" subtitle="Create and configure Minecraft versions and launch modes." /><PrimaryButton onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Create version</PrimaryButton></div>
-      {profiles.length === 0 ? <GlassCard className="p-8 text-center text-sm text-white/50">No versions yet. Create a version to get started.</GlassCard> : <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {profiles.map((profile) => <VersionProfileCard key={profile.id} profile={profile} availableVersions={availableVersions} active={profile.id === activeProfileId} onSelect={() => selectProfile(profile.id)} onUpdate={(updates) => updateProfile(profile.id, updates)} onRemove={() => removeProfile(profile.id)} />)}
-      </div>}
+        <button type="button" onClick={() => setCreating(true)} className="profile-create-card group">
+          <span className="profile-create-icon"><Plus className="h-7 w-7 transition-transform duration-200 group-hover:rotate-90" /></span>
+          <strong>Create profile</strong>
+          <small>Add another isolated Minecraft version</small>
+        </button>
+      </div>
       {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreating(false); }}><form onSubmit={createProfile} className="w-full max-w-md rounded-xl border border-white/10 bg-[#0e141b] p-5 shadow-2xl"><h3 className="text-lg font-semibold">Create version</h3><p className="mb-5 mt-1 text-xs text-white/45">Create a Fabric profile for Minecraft {version}.</p><div className="grid gap-4"><label className="grid gap-2 text-xs text-white/55">Profile name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={`Minecraft ${version}`} className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white outline-none" /></label><label className="grid gap-2 text-xs text-white/55">Minecraft version<MinecraftVersionDropdown value={version} onChange={setVersion} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Loader<div className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white">Fabric</div></label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setCreating(false)} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-white/65">Cancel</button><button type="submit" className="rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black">Create version</button></div></form></div>}
     </div>
   </motion.div>;
@@ -799,76 +809,39 @@ function ProfilesPage() {
 function VersionProfileCard({ profile, availableVersions, active, onSelect, onUpdate, onRemove }: { profile: VersionProfile; availableVersions: string[]; active: boolean; onSelect: () => void; onUpdate: (updates: Partial<Pick<VersionProfile, 'name' | 'version'>>) => void; onRemove: () => void }) {
   const [mods, setMods] = useState<InstalledMod[]>([]);
   const [addModOpen, setAddModOpen] = useState(false);
+  const [addResourcePackOpen, setAddResourcePackOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { void window.electronAPI?.getInstalledMods(profile.id).then(setMods).catch(() => {}); }, [profile.id]);
-  return <GlassCard className="p-5">
-    <div className="mb-4 flex items-start justify-between gap-3"><div><input aria-label="Profile name" value={profile.name} onChange={(event) => onUpdate({ name: event.target.value })} className="w-full bg-transparent text-base font-semibold outline-none" /><p className="mt-1 text-xs text-white/45">Minecraft {profile.version} · Fabric</p></div><span className="rounded-md border border-white/10 px-2 py-1 text-[10px] text-white/60">{active ? 'ACTIVE' : 'PROFILE'}</span></div>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-2 text-xs text-white/55">Version<MinecraftVersionDropdown value={profile.version} onChange={(value) => onUpdate({ version: value })} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Loader<div className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2 text-sm text-white">Fabric</div></label></div>
-    <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={onSelect} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 hover:bg-white/10">Use on Home</button><button type="button" onClick={() => setAddModOpen(true)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"><Plus className="mr-1 inline h-3.5 w-3.5" />Add mod ({mods.length})</button><button type="button" onClick={onRemove} className="ml-auto rounded-lg border border-red-400/20 px-3 py-2 text-xs text-red-200/75 hover:bg-red-500/10">Remove</button></div>
-    {addModOpen && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} />}
-  </GlassCard>;
-}
-
-function DiscordPresenceCard() {
-  const [status, setStatus] = useState<DiscordPresenceStatus>({
-    state: 'connected',
-    message: 'Bayon Client activity is visible on Discord.',
-    configured: true,
-  });
-  const settings = useSettingsStore();
-
-  useEffect(() => {
-    const api = window.electronAPI;
-    if (!api) {
-      setStatus({ state: 'error', message: 'Discord Rich Presence requires the desktop app.', configured: false });
-      return;
-    }
-    const unsubscribe = api.onDiscordPresenceStatus(setStatus);
-    api.getDiscordPresenceStatus().then(setStatus).catch((cause: unknown) => {
-      setStatus({
-        state: 'error',
-        message: cause instanceof Error ? cause.message : 'Could not read Discord Rich Presence status.',
-        configured: false,
-      });
-    });
-    return unsubscribe;
-  }, []);
-
-  const togglePresence = async (enabled: boolean) => {
-    settings.setDiscordPresence(enabled);
-    if (!window.electronAPI) return;
-    try {
-      if (enabled) {
-        setStatus(await window.electronAPI.reconnectDiscordPresence());
-      } else {
-        setStatus(await window.electronAPI.disableDiscordPresence());
-      }
-    } catch {
-      // Ignored
-    }
-  };
-
-  return (
-    <>
-      <div className="discord-icon"><Radio className="h-5 w-5" /></div>
-      <div className="rail-grow discord-presence-copy">
-        <strong>Discord Rich Presence</strong>
-        <small title={status.message} className={`discord-presence-state discord-state-${status.state}`}>
-          {!settings.discordPresence
-            ? 'Turned off'
-            : status.state === 'connected'
-            ? 'Activity is active'
-            : status.state === 'connecting'
-            ? 'Connecting to Discordâ€¦'
-            : status.state === 'discord-not-running'
-            ? 'Discord is not connected'
-            : status.state === 'error'
-            ? (status.message || 'Needs attention')
-            : 'Turned off'}
-        </small>
+  return <GlassCard className={`profile-card overflow-visible p-0 ${active ? 'profile-card-active' : ''}`}>
+    <div className="profile-card-cover">
+      <div className="profile-card-heading">
+        <div className="profile-card-icon"><Layers3 className="h-6 w-6" /></div>
+        <div className="min-w-0 flex-1">
+          <input aria-label="Profile name" value={profile.name} onChange={(event) => onUpdate({ name: event.target.value })} className="w-full truncate bg-transparent text-base font-bold outline-none focus:text-sky-100" />
+          <p className="mt-1 truncate text-sm text-white/60">Bayon Client + Fabric {profile.version}</p>
+        </div>
+        {active && <span className="profile-active-mark" title="Selected for launch"><Check className="h-4 w-4" /></span>}
       </div>
-      <Toggle checked={settings.discordPresence} onChange={togglePresence} />
-    </>
-  );
+      <div className="profile-card-version">
+        <label className="grid min-w-0 flex-1 gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/45">Minecraft version<MinecraftVersionDropdown value={profile.version} onChange={(value) => onUpdate({ version: value })} availableVersions={availableVersions} /></label>
+        <div className="grid min-w-0 flex-1 gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/45">Mod loader<div className="profile-loader-value">Fabric</div></div>
+      </div>
+    </div>
+    <div className="profile-card-actions">
+      <button type="button" onClick={onSelect} className="profile-action profile-action-primary"><Check className="h-4 w-4" />Use on Home</button>
+      <button type="button" onClick={() => setAddModOpen(true)} className="profile-action"><Layers3 className="h-4 w-4" />Mods <span className="profile-action-count">{mods.length}</span></button>
+      <button type="button" onClick={() => setAddResourcePackOpen(true)} className="profile-action"><FileImage className="h-4 w-4" />Resource Packs</button>
+      <div className="relative">
+        <button type="button" aria-label="More profile actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)} className="profile-action profile-action-menu"><MoreHorizontal className="h-5 w-5" /></button>
+        {menuOpen && <><button type="button" aria-label="Close profile actions" className="fixed inset-0 z-10 cursor-default" onClick={() => setMenuOpen(false)} /><div className="profile-card-menu">
+          <button type="button" onClick={() => { onSelect(); setMenuOpen(false); }}>Set as active profile</button>
+          <button type="button" className="profile-card-menu-danger" onClick={() => { onRemove(); setMenuOpen(false); }}>Remove profile</button>
+        </div></>}
+      </div>
+    </div>
+    {addModOpen && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} />}
+    {addResourcePackOpen && <AddModModal onClose={() => setAddResourcePackOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} projectType="resourcepack" />}
+  </GlassCard>;
 }
 
 function AccountsPage() {
@@ -878,10 +851,52 @@ function AccountsPage() {
   const createOfflineAccount = useAccountStore((state) => state.createOfflineAccount);
   const selectAccount = useAccountStore((state) => state.selectAccount);
   const removeAccount = useAccountStore((state) => state.removeAccount);
+  const updateAccountEmail = useAccountStore((state) => state.updateAccountEmail);
   const [createOpen, setCreateOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [emailAccountId, setEmailAccountId] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [microsoftIdentity, setMicrosoftIdentity] = useState(getBacoinsIdentity);
+  const [microsoftBusy, setMicrosoftBusy] = useState(false);
+  const [microsoftNotice, setMicrosoftNotice] = useState('');
+  const [accountQuery, setAccountQuery] = useState('');
+  const [newestFirst, setNewestFirst] = useState(true);
+  const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
+  const [accountChoiceOpen, setAccountChoiceOpen] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => setMicrosoftIdentity(getBacoinsIdentity());
+    window.addEventListener('bayon:bacoins-auth-changed', refresh);
+    return () => window.removeEventListener('bayon:bacoins-auth-changed', refresh);
+  }, []);
+
+  const connectMicrosoft = async () => {
+    setMicrosoftBusy(true);
+    setMicrosoftNotice('');
+    try {
+      const selected = accounts.find((account) => account.id === activeAccountId);
+      await signInWithMicrosoft(selected ? { id: selected.id, username: selected.username } : undefined);
+      setMicrosoftIdentity(getBacoinsIdentity());
+      setMicrosoftNotice('Microsoft account connected. Bacoins will sync with the Store.');
+    } catch (cause) {
+      setMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not connect the Microsoft account.');
+    } finally {
+      setMicrosoftBusy(false);
+    }
+  };
+
+  const saveOfflineEmail = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const account = accounts.find((item) => item.id === emailAccountId);
+    if (!account) return;
+    const email = emailDraft.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    updateAccountEmail(account.id, email || null);
+    setEmailAccountId(null);
+    setEmailDraft('');
+  };
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -895,42 +910,69 @@ function AccountsPage() {
     }
   };
 
+  const visibleAccounts = [...accounts]
+    .filter((account) => account.username.toLowerCase().includes(accountQuery.trim().toLowerCase()))
+    .sort((a, b) => (newestFirst ? 1 : -1) * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
       <div className="account-page">
         <div className="account-page-heading">
-          <PageHeader title="Accounts" subtitle="Create a local offline profile now. Microsoft sign-in is not available yet." />
-          <button type="button" className="launch-process-button" onClick={() => { setError(''); setCreateOpen(true); }}><Plus className="h-4 w-4" /> Create offline account</button>
+          <PageHeader title="Accounts" subtitle="Manage your Minecraft profiles and secure Bayon account connections." />
+          <button type="button" className="launch-process-button" onClick={() => setAccountChoiceOpen(true)}><Plus className="h-4 w-4" /> Add Account</button>
         </div>
-        <div className="account-type-grid">
-          <GlassCard className="account-type-card account-offline-card">
-            <div className="account-type-icon"><UserRound className="h-5 w-5" /></div>
-            <div><strong>Offline account</strong><p>Works locally in Bayon Client. No Microsoft sign-in required.</p></div>
-            <button type="button" onClick={() => { setError(''); setCreateOpen(true); }}>Create</button>
-          </GlassCard>
-          <GlassCard className="account-type-card account-microsoft-card">
-            <div className="account-type-icon"><Coins className="h-5 w-5" /></div>
-            <div><strong>Bacoins Beta</strong><p>Connect your offline profile to redeem codes and sync cosmetics without email verification.</p></div>
-            <button type="button" onClick={() => navigate('/store')}>Open Store</button>
-          </GlassCard>
-        </div>
-        <GlassCard className="account-list-card">
-          <div className="account-list-heading"><div><h2>Your accounts</h2><p>{accounts.length} offline {accounts.length === 1 ? 'profile' : 'profiles'} saved on this device</p></div></div>
+        {microsoftNotice && <div className="account-auth-notice" role="status"><KeyRound className="h-4 w-4" /><span>{microsoftNotice}{microsoftIdentity?.email && <> <strong>{microsoftIdentity.email}</strong></>}</span></div>}
+        <section className="account-list-section">
+          <div className="account-list-heading"><div><h2>Your Accounts</h2><p>{accounts.length} local {accounts.length === 1 ? 'account' : 'accounts'} saved on this device</p></div></div>
+          <div className="account-toolbar">
+            <label className="account-search"><Search className="h-4 w-4" /><input value={accountQuery} onChange={(event) => setAccountQuery(event.target.value)} placeholder="Search accounts..." aria-label="Search accounts" /></label>
+            <button type="button" className="account-sort-button" onClick={() => setNewestFirst((value) => !value)}><ChevronDown className={`h-4 w-4 transition-transform ${newestFirst ? '' : 'rotate-180'}`} />Date added</button>
+          </div>
           {accounts.length === 0 ? (
-            <div className="account-empty"><UserRound className="h-6 w-6" /><strong>No accounts yet</strong><span>Create an offline account to get started. It will be saved on this device.</span><button type="button" onClick={() => setCreateOpen(true)}>Create offline account</button></div>
+            <div className="account-empty"><UserRound className="h-6 w-6" /><strong>No accounts yet</strong><span>Create an account to get started. It will be saved on this device.</span><button type="button" onClick={() => setAccountChoiceOpen(true)}>Add account</button></div>
           ) : (
-            <div className="account-list">{accounts.map((account) => (
-              <div className="account-row" key={account.id}>
-                <MinecraftAvatar username={account.username} skin={account.skin} className="avatar-large" />
-                <div className="account-row-copy"><strong>{account.username}</strong><small>Offline profile Â· created {new Date(account.createdAt).toLocaleDateString()}</small></div>
-                {activeAccountId === account.id ? <span className="account-active-badge">Active</span> : <button type="button" className="account-select-button" onClick={() => selectAccount(account.id)}>Use account</button>}
-                <button type="button" className="account-select-button" onClick={() => { selectAccount(account.id); navigate('/store'); }}>Connect Bacoins</button>
-                <button type="button" className="account-remove-button" onClick={() => setConfirmRemove(account.id)} aria-label={`Remove ${account.username}`}>Remove</button>
-              </div>
-            ))}</div>
+            <div className="account-card-grid">
+              {visibleAccounts.map((account) => (
+                <article className={`account-profile-card ${activeAccountId === account.id ? 'account-profile-card-active' : ''}`} key={account.id}>
+                  <button type="button" className="account-profile-main" onClick={() => selectAccount(account.id)} aria-pressed={activeAccountId === account.id}>
+                    <MinecraftAvatar username={account.username} skin={account.skin} className="avatar-large account-profile-avatar" />
+                    <span className="account-profile-copy"><strong>{account.username}</strong><small>Local account / Added {new Date(account.createdAt).toLocaleDateString()}</small></span>
+                    {activeAccountId === account.id && <span className="account-profile-check" title="Active account"><Check className="h-4 w-4" /></span>}
+                  </button>
+                  <div className="account-profile-actions">
+                    <button type="button" className="account-profile-skins" onClick={() => { selectAccount(account.id); navigate('/skins'); }}><FileImage className="h-3.5 w-3.5" />Skins</button>
+                    <div className="relative">
+                      <button type="button" className="account-profile-more" aria-label={`More actions for ${account.username}`} aria-expanded={accountMenuId === account.id} onClick={() => setAccountMenuId((current) => current === account.id ? null : account.id)}><MoreHorizontal className="h-5 w-5" /></button>
+                      {accountMenuId === account.id && <><button type="button" className="fixed inset-0 z-10 cursor-default" aria-label="Close account menu" onClick={() => setAccountMenuId(null)} /><div className="account-profile-menu">
+                        {activeAccountId !== account.id && <button type="button" onClick={() => { selectAccount(account.id); setAccountMenuId(null); }}>Use account</button>}
+                        <button type="button" onClick={() => { setEmailAccountId(account.id); setEmailDraft(account.email ?? ''); setAccountMenuId(null); }}><Mail className="h-3.5 w-3.5" />{account.email ? 'Edit email' : 'Add email'}</button>
+                        <button type="button" onClick={() => { selectAccount(account.id); navigate('/store'); setAccountMenuId(null); }}><ShoppingCart className="h-3.5 w-3.5" />Open Store</button>
+                        <button type="button" className="account-profile-remove" onClick={() => { setConfirmRemove(account.id); setAccountMenuId(null); }}>Remove account</button>
+                      </div></>}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              <button type="button" className="account-add-card" onClick={() => setAccountChoiceOpen(true)}><Plus className="h-9 w-9" /><strong>Add account</strong></button>
+              {visibleAccounts.length === 0 && <div className="account-search-empty">No accounts match: {accountQuery}.</div>}
+            </div>
           )}
-        </GlassCard>
+        </section>
       </div>
+      {accountChoiceOpen && <Modal title="Add Account" onClose={() => setAccountChoiceOpen(false)}>
+        <div className="account-choice-list">
+          <button type="button" className="account-choice-option" onClick={() => { setAccountChoiceOpen(false); setError(''); setCreateOpen(true); }}>
+            <span className="account-choice-icon"><UserRound className="h-5 w-5" /></span>
+            <span><strong>Offline account</strong><small>Create a local Minecraft profile with a username. No Microsoft sign-in required.</small></span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button type="button" className="account-choice-option" disabled={microsoftBusy} onClick={() => { setAccountChoiceOpen(false); void connectMicrosoft(); }}>
+            <span className="account-choice-icon"><KeyRound className="h-5 w-5" /></span>
+            <span><strong>{microsoftBusy ? 'Connecting…' : 'Online account'}</strong><small>Continue with Microsoft for Bayon account, Bacoins, and cosmetic sync. Minecraft sign-in is not available yet.</small></span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </Modal>}
       {createOpen && (
         <Modal title="Create offline account" onClose={() => setCreateOpen(false)}>
           <form className="offline-account-form" onSubmit={submit}>
@@ -940,6 +982,17 @@ function AccountsPage() {
             <small>3â€“16 letters, numbers, or underscores.</small>
             {error && <p className="mod-catalog-error" role="alert">{error}</p>}
             <div className="offline-form-actions"><button type="button" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit">Create account</button></div>
+          </form>
+        </Modal>
+      )}
+      {emailAccountId && (
+        <Modal title="Offline profile contact email" onClose={() => { setEmailAccountId(null); setEmailDraft(''); }}>
+          <form className="offline-account-form" onSubmit={saveOfflineEmail}>
+            <p>This optional email is saved on this device without verification. It is contact information only; Microsoft sign-in protects Bacoins and account sync.</p>
+            <label htmlFor="offline-contact-email">Email address</label>
+            <input id="offline-contact-email" type="email" autoComplete="email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} placeholder="you@example.com" />
+            <small>Leave blank and save to remove it from this offline profile.</small>
+            <div className="offline-form-actions"><button type="button" onClick={() => { setEmailAccountId(null); setEmailDraft(''); }}>Cancel</button><button type="submit">Save email</button></div>
           </form>
         </Modal>
       )}
@@ -959,7 +1012,6 @@ function AccountsPage() {
 
 function PlayPage() {
   const availableVersions = useMinecraftVersions();
-  const [memory, setMemory] = useState(8);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Ready to prepare launch options.');
   const [launching, setLaunching] = useState(false);
@@ -989,7 +1041,7 @@ function PlayPage() {
         profileName: activeProfile?.name,
         profileId: activeProfile?.id,
         username: activeAccount?.username ?? 'Player',
-        memory: memory,
+                memory: settings.selectedRam,
         javaPath: settings.javaPath,
         customArgs: settings.customArgs,
       });
@@ -1042,8 +1094,8 @@ function PlayPage() {
 
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <div>
-              <div className="mb-2 flex items-center justify-between text-sm text-white/70"><span>Memory Allocation</span><span>{memory} GB</span></div>
-              <input type="range" min={4} max={16} step={1} value={memory} onChange={(e) => setMemory(Number(e.target.value))} className="slider w-full" />
+              <div className="mb-2 flex items-center justify-between text-sm text-white/70"><span>Memory Allocation</span><span>{settings.selectedRam} GB</span></div>
+              <input type="range" min={4} max={16} step={1} value={settings.selectedRam} onChange={(e) => settings.setSelectedRam(Number(e.target.value))} className="slider w-full" aria-label="Minecraft memory allocation" />
             </div>
             <div>
               <Label>Resolution</Label>
@@ -1084,7 +1136,7 @@ function PlayPage() {
             </div>
             <div className="mb-2 flex items-center justify-between text-sm text-white/70">
               <span>Memory</span>
-              <span>{memory} GB</span>
+              <span>{settings.selectedRam} GB</span>
             </div>
             <div className="mt-4">
               <ProgressBar value={progress} />
@@ -1106,10 +1158,22 @@ function ModsPage() {
   const [projectType, setProjectType] = useState<ModrinthProjectType>('mod');
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [addModOpen, setAddModOpen] = useState(false);
+  const [bayonModStatus, setBayonModStatus] = useState<BayonModStatus | null>(null);
+  const [bayonModBusy, setBayonModBusy] = useState(false);
+  const [bayonModError, setBayonModError] = useState('');
 
   useEffect(() => {
     if (window.electronAPI?.getInstalledMods) {
       window.electronAPI.getInstalledMods(activeProfileId ?? undefined).then(setMods).catch(() => {});
+    }
+  }, [activeProfileId]);
+
+  useEffect(() => {
+    setBayonModStatus(null);
+    if (window.electronAPI?.getBayonModStatus) {
+      window.electronAPI.getBayonModStatus(activeProfileId ?? undefined).then(setBayonModStatus).catch((cause: unknown) => {
+        setBayonModStatus({ available: false, installed: false, version: null, error: cause instanceof Error ? cause.message : 'Could not check the Bayon mod.' });
+      });
     }
   }, [activeProfileId]);
 
@@ -1150,6 +1214,33 @@ function ModsPage() {
     void window.electronAPI?.openModsFolder(activeProfileId ?? undefined, projectType);
   };
 
+  const installBayonMod = async () => {
+    if (!window.electronAPI?.installBayonMod || !activeProfile) return;
+    setBayonModBusy(true);
+    setBayonModError('');
+    try {
+      const status = await window.electronAPI.installBayonMod(activeProfile.id);
+      setBayonModStatus(status);
+    } catch (cause) {
+      setBayonModError(cause instanceof Error ? cause.message : 'Could not install Bayon Client into this profile.');
+    } finally {
+      setBayonModBusy(false);
+    }
+  };
+
+  const removeBayonMod = async () => {
+    if (!window.electronAPI?.uninstallBayonMod || !activeProfile) return;
+    setBayonModBusy(true);
+    setBayonModError('');
+    try {
+      setBayonModStatus(await window.electronAPI.uninstallBayonMod(activeProfile.id));
+    } catch (cause) {
+      setBayonModError(cause instanceof Error ? cause.message : 'Could not remove Bayon Client from this profile.');
+    } finally {
+      setBayonModBusy(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="page-scroll p-5">
       <div className="space-y-5">
@@ -1162,6 +1253,27 @@ function ModsPage() {
             <PrimaryButton onClick={() => activeProfile && setAddModOpen(true)}><Plus className="h-4 w-4" /> Browse {contentLabel}</PrimaryButton>
           </div>
         </div>
+
+        <GlassCard className="flex flex-col gap-4 border-white/10 p-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/5"><Layers3 className="h-5 w-5 text-white/80" /></span>
+            <div>
+              <h2 className="font-semibold">Bayon Client Fabric HUD</h2>
+              <p className="mt-1 text-xs text-white/50">FPS, keystrokes, CPS, coordinates, ping, direction, armor and effects · Minecraft 26.2 · Fabric</p>
+              {bayonModStatus?.installed && <p className="mt-2 text-xs text-emerald-300">Installed in this profile · v{bayonModStatus.installedVersion}</p>}
+              {!bayonModStatus?.available && bayonModStatus?.error && <p className="mt-2 text-xs text-amber-200/80">{bayonModStatus.error}</p>}
+              {bayonModError && <p role="alert" className="mt-2 text-xs text-red-300">{bayonModError}</p>}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {bayonModStatus?.installed && <button type="button" disabled={bayonModBusy} onClick={() => void removeBayonMod()} className="rounded-xl border border-white/10 bg-white/4 px-4 py-2.5 text-xs text-white/70 transition hover:bg-white/8 disabled:opacity-50">Remove from profile</button>}
+            <button type="button" disabled={!activeProfile || activeProfile.version !== '26.2' || bayonModBusy || !bayonModStatus?.available} onClick={() => void installBayonMod()} className="flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-45">
+              {bayonModBusy ? <span className="java-spinner" /> : <Download className="h-4 w-4" />}
+              {bayonModBusy ? 'Installing…' : bayonModStatus?.installed ? 'Update Bayon mod' : 'Install Bayon mod'}
+            </button>
+          </div>
+          {activeProfile && activeProfile.version !== '26.2' && <p className="text-xs text-amber-200/75 md:basis-full">Select a Minecraft 26.2 profile to install this build. Other game versions are not claimed as compatible.</p>}
+        </GlassCard>
 
         <div className="flex gap-2 overflow-x-auto rounded-xl border border-white/8 bg-[#0d1218] p-1.5" role="tablist" aria-label="Minecraft content type">
           {modContentTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={projectType === tab.id} onClick={() => { setProjectType(tab.id); setCategory('All'); setSearch(''); }} className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition ${projectType === tab.id ? 'border border-white/10 bg-[#202a34] text-white shadow' : 'text-white/50 hover:bg-white/5 hover:text-white/85'}`}>{tab.label}</button>)}
@@ -1528,6 +1640,24 @@ function SkinsPage() {
   );
 }
 
+function DiscordPresenceSettings({ enabled, onEnabledChange }: { enabled: boolean; onEnabledChange: (enabled: boolean) => void }) {
+  const [status, setStatus] = useState<DiscordPresenceStatus>({ state: 'not-configured', message: 'Discord Rich Presence is turned off.', configured: false });
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+    const unsubscribe = api.onDiscordPresenceStatus(setStatus);
+    void api.getDiscordPresenceStatus().then(setStatus).catch(() => {});
+    return unsubscribe;
+  }, []);
+
+  return <section className="discord-settings-card md:col-span-2">
+    <div className="discord-settings-heading"><span className="discord-settings-icon"><Radio className="h-5 w-5" /></span><div><strong>Discord Rich Presence</strong><small>Automatically connect to Discord and show Bayon Client activity.</small></div><Toggle checked={enabled} onChange={onEnabledChange} /></div>
+    <div className={'discord-settings-connection'}><span className={'discord-status-dot discord-status-' + status.state} /><div><strong>{status.state === 'connected' ? 'Connected' : status.state === 'connecting' ? 'Connecting' : status.state === 'discord-not-running' ? 'Discord is not running' : status.state === 'error' ? 'Connection error' : enabled ? 'Starting connection' : 'Turned off'}</strong><small>{status.message}</small></div></div>
+    <p className="discord-settings-help">Keep the Discord desktop app open and enable <strong>User Settings ? Activity Privacy ? Share your activity status</strong>.</p>
+  </section>;
+}
+
 function SettingsPage() {
   const availableVersions = useMinecraftVersions();
   const settings = useSettingsStore();
@@ -1636,20 +1766,6 @@ function SettingsPage() {
     } catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Could not clear launcher data.'); setRecoveryBusy(''); setShowClearConfirm(false); }
   };
 
-  const handleToggleDiscordPresence = async (enabled: boolean) => {
-    settings.setDiscordPresence(enabled);
-    if (!window.electronAPI) return;
-    try {
-      if (enabled) {
-        await window.electronAPI.reconnectDiscordPresence();
-      } else {
-        await window.electronAPI.disableDiscordPresence();
-      }
-    } catch {
-      // Ignored
-    }
-  };
-
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="page-scroll p-5">
       <div className="settings-page">
@@ -1658,10 +1774,10 @@ function SettingsPage() {
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <SettingRow label="Launch on startup" icon={Radio}><Toggle checked={settings.launchOnStartup} onChange={settings.setLaunchOnStartup} /></SettingRow>
             <SettingRow label="Minimize to tray" icon={Minus}><Toggle checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} /></SettingRow>
-            <SettingRow label="Discord Rich Presence" icon={Radio}><Toggle checked={settings.discordPresence} onChange={handleToggleDiscordPresence} /></SettingRow>
+            <DiscordPresenceSettings enabled={settings.discordPresence} onEnabledChange={settings.setDiscordPresence} />
             <div>
               <SettingLabel icon={Globe}>Language</SettingLabel>
-              <Select value={settings.language} onChange={settings.setLanguage} options={['English (US)', 'English (UK)', 'Deutsch', 'EspaÃ±ol']} />
+              <Select value={settings.language === 'Khmer' ? 'Khmer' : 'English'} onChange={settings.setLanguage} options={['English', 'Khmer']} />
             </div>
             <div>
               <SettingLabel icon={Layers3}>Active profile version</SettingLabel>
@@ -1669,7 +1785,11 @@ function SettingsPage() {
             </div>
             <div>
               <SettingLabel icon={HardDrive}>RAM allocation</SettingLabel>
-              <Select value={String(settings.selectedRam)} onChange={(v) => settings.setSelectedRam(Number(v))} options={['4', '6', '8', '12', '16']} />
+              <div className="ram-setting-control">
+                <div className="ram-setting-range-labels"><span>4 GB</span><strong>{settings.selectedRam} GB</strong><span>16 GB</span></div>
+                <input type="range" min={4} max={16} step={1} value={settings.selectedRam} onChange={(event) => settings.setSelectedRam(Number(event.target.value))} className="slider ram-setting-slider" aria-label="RAM allocation" />
+                <small>Memory reserved for Minecraft when you launch a profile.</small>
+              </div>
             </div>
             <div>
               <SettingLabel icon={Monitor}>FPS limit</SettingLabel>
@@ -1882,7 +2002,7 @@ function MinecraftAvatar({ username, skin, className }: { username: string; skin
 
 function Modal({ title, children, onClose, className = '' }: { title: string; children: React.ReactNode; onClose: () => void; className?: string }) {
   const isFullScreen = className.includes('mod-catalog-modal');
-  return (
+  return createPortal((
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px] ${isFullScreen ? 'modal-fullscreen-backdrop' : ''}`}>
       <div className={`w-full max-w-md rounded-[24px] border border-white/10 bg-[#0d0d0d] p-4 shadow-[0_0_80px_rgba(0,0,0,0.55)] ${className}`}>
         <div className="mb-4 flex items-center justify-between">
@@ -1892,7 +2012,7 @@ function Modal({ title, children, onClose, className = '' }: { title: string; ch
         {children}
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function Label({ children }: { children: React.ReactNode }) {
