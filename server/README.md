@@ -48,23 +48,32 @@ If you prefer creating a Web Service manually:
 
 ## Bacoins and redeem codes
 
-To connect an offline Minecraft profile, select it in **Accounts**, open the **Sign in Email** dropdown in the title bar, enter an email address, and request a verification code. Supabase Auth sends and verifies the OTP; Bayon's backend validates the resulting Supabase session before linking the selected profile. Bacoins balances and cosmetic purchases remain stored on the Bayon backend.
+For beta testing in Bayon Client, select an offline profile, open **Bacoins Beta**, and enable beta Bacoins. The client creates/reuses an account based on that offline profile without email verification or a verification code. That beta identity is intended for testing and can be disabled on the server with `BACOIN_BETA_MODE=false`.
 
 ### Supabase setup
 
 1. Create a Supabase project and enable email authentication.
 2. In **Authentication → SMTP Settings**, configure Brevo as the custom SMTP provider using the SMTP host, port, username, and SMTP key shown in your Brevo SMTP settings. Use Brevo's SMTP credentials here; the Brevo REST API key is not an SMTP password. Supabase's default mail service is restricted to project team addresses and is intended for testing; use custom SMTP for real users. See [Supabase custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp).
-3. In **Authentication → Email Templates**, set the sign-in template to include `{{ .Token }}` so it delivers an OTP that users can type into the client. The client accepts the configured 6–8 digit code. See [Supabase email templates](https://supabase.com/docs/guides/auth/auth-email-templates).
-4. Set these values in the backend environment (for example, Render):
+3. In **Authentication → Emails → Templates**, keep the **Magic Link** and **Confirm signup** templates using `{{ .ConfirmationURL }}` so Supabase sends a clickable verification link. Do not replace it with `{{ .Token }}`; Bayon does not ask users to type a code.
+4. In **Authentication → URL Configuration**, add `http://127.0.0.1:*/auth/callback` to the allowed Redirect URLs. Bayon uses a temporary local callback port to receive the verified session. See [Supabase URL Configuration](https://supabase.com/docs/guides/auth/redirect-urls) and [email templates](https://supabase.com/docs/guides/auth/auth-email-templates).
+5. Set these values in the backend environment (for example, Render):
    - `SUPABASE_URL`: Project URL, such as `https://<project-ref>.supabase.co`.
    - `SUPABASE_ANON_KEY`: Supabase anon/publishable key. Never use the `service_role` key here.
 
-The launcher reads the project URL and public anon key from the Bayon backend config endpoint. Keep the Supabase service-role key private and do not put it in the client. Without both settings, email sign-in reports that Supabase is not configured.
+The web store reads the project URL and public anon key from the Bayon backend config endpoint. Keep the Supabase service-role key private and do not put it in the client. Supabase email verification remains enabled for the web store; Bayon Client beta sign-in does not use it.
 
-Google OAuth endpoints remain available as an optional alternative. The app's Bacoins sign-in uses Supabase email OTP.
-The Store currently accepts redeem codes and sells the configured cosmetics. Payment processing is not enabled.
+Google OAuth endpoints remain available as an optional account-linking alternative.
+The hosted store is served from the backend root URL. It uses the same verified email identity and Bacoins balance as Bayon Client. The store accepts redeem codes and sells configured cosmetics; card payments are intentionally left for a later setup.
 
-Create codes from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
+### Hosted store and private admin panel
+
+Render creates `BACOIN_ADMIN_KEY` and `ADMIN_PANEL_SECRET` automatically from `render.yaml`. It enables `BACOIN_BETA_MODE` for this beta. The store lives at `https://<your-service-name>.onrender.com/`. The private admin page path is `/admin-panel-<ADMIN_PANEL_SECRET>`; Render logs print the route on startup. Admin APIs also require a short-lived admin session created by entering `BACOIN_ADMIN_KEY`, so knowing the route alone does not grant access.
+
+In Supabase **Authentication → URL Configuration → Redirect URLs**, allow the store host (for example `https://<your-service-name>.onrender.com/**`). The app no longer needs the local Supabase callback. Keep the email templates on `{{ .ConfirmationURL }}` for verified sign-in links on the web store.
+
+The admin panel can create/delete cosmetics, set Bacoins prices, upload `.glb` 3D previews, and generate redeem codes. Uploaded assets and balances use the backend's `server/data` directory. Configure persistent storage for that directory on the host before relying on production purchases and uploaded models; ephemeral deployments can lose local files during restarts or redeploys.
+
+You can generate codes in the private admin panel, or from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
 
 ```powershell
 $headers = @{ 'x-bayon-admin-key' = $env:BACOIN_ADMIN_KEY }

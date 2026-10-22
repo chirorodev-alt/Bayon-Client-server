@@ -32,28 +32,13 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '18mb' }));
 
 // Load in-memory DB state with file sync
 let db = loadDb();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Bayon Client API',
-    status: 'online',
-    version: '1.0.0',
-    endpoints: {
-      health: '/api/health',
-      friends: '/api/friends',
-      auth: {
-        register: 'POST /api/auth/register',
-        login: 'POST /api/auth/login',
-        me: 'GET /api/auth/me',
-      },
-    },
-  });
-});
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store.html')));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -270,6 +255,17 @@ const cosmeticCatalog = [
   { id: 'diamond-badge', name: 'Diamond Badge', description: 'Show off a polished diamond badge.', category: 'Badge', price: 600, accent: '#38bdf8' },
   { id: 'gold-name', name: 'Golden Name', description: 'A golden name treatment in the client.', category: 'Name style', price: 800, accent: '#facc15' },
 ];
+if (!db.cosmeticsInitialized) {
+  if (!db.cosmetics.length) db.cosmetics = cosmeticCatalog;
+  db.cosmeticsInitialized = true;
+  saveDb(db);
+}
+const adminSecret = process.env.BACOIN_ADMIN_KEY || '';
+const adminPanelSecret = process.env.ADMIN_PANEL_SECRET || '';
+const adminPanelPath = adminPanelSecret ? `/admin-panel-${adminPanelSecret}` : '';
+const mediaDirectory = path.join(__dirname, '..', 'data', 'cosmetics');
+fs.mkdirSync(mediaDirectory, { recursive: true });
+app.use('/media/cosmetics', express.static(mediaDirectory, { fallthrough: false, maxAge: '1d' }));
 
 app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
@@ -301,7 +297,7 @@ app.post('/api/auth/supabase/link', async (req, res) => {
   } catch {
     return res.status(502).json({ error: 'Bayon could not reach Supabase Auth. Check the Supabase project URL.' });
   }
-  if (!authResponse.ok) return res.status(401).json({ error: 'Supabase could not verify this session. Request a new email code and try again.' });
+  if (!authResponse.ok) return res.status(401).json({ error: 'Supabase could not verify this session. Request a new email link and try again.' });
   const identity = await authResponse.json();
   const email = typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : '';
   if (!email || !identity.email_confirmed_at) return res.status(403).json({ error: 'Verify this email in Supabase before connecting your profile.' });
@@ -477,6 +473,30 @@ app.post('/api/auth/offline-profile', authenticatedUser, (req, res) => {
   }
 });
 
+app.post('/api/auth/bacoins/beta', (req, res) => {
+  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
+  const profileId = req.body?.profileId;
+  const profileUsername = req.body?.username;
+  if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) return res.status(400).json({ error: 'Select a valid offline Minecraft profile first.' });
+  let user = db.users.find((candidate) => candidate.linkedOfflineProfiles?.some((profile) => profile.id === profileId));
+  if (!user) {
+    const base = `b_${crypto.createHash('sha256').update(profileId).digest('hex').slice(0, 10)}`;
+    let username = base;
+    let suffix = 1;
+    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
+    user = { id: `user-${crypto.randomUUID()}`, username, status: 'online', avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(profileUsername)}`, createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
+    db.users.push(user);
+  }
+  try { linkOfflineProfileToUser(user, profileId, profileUsername); }
+  catch (error) { return res.status(409).json({ error: error.message || 'Could not create a beta Bacoins account.' }); }
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  user.ownedCosmetics ??= [];
+  user.status = 'online';
+  saveDb(db);
+  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ success: true, betaMode: true, token, user: publicBayonUser(user) });
+});
+
 app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile, async (req, res) => {
   try {
     const identity = await exchangeGoogleAuthorization(req.body || {});
@@ -495,7 +515,132 @@ function publicBayonUser(user) {
   return { id: user.id, username: user.username, email: user.email || user.googleEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
 }
 
-app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: cosmeticCatalog }));
+app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: db.cosmetics.filter((item) => item.active !== false) }));
+
+app.get('/api/store/config', (_req, res) => {
+  res.json({ supabaseUrl: process.env.SUPABASE_URL || null, supabaseAnonKey: process.env.SUPABASE_ANON_KEY || null });
+});
+
+app.get('/api/store/me', authenticatedUser, (_req, res) => res.json({ user: publicBayonUser(_req.bayonUser) }));
+app.post('/api/store/redeem', authenticatedUser, (req, res) => {
+  const normalized = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  if (!normalized || normalized.length > 80) return res.status(400).json({ error: 'Enter a valid redeem code.' });
+  const codeHash = crypto.createHash('sha256').update(normalized).digest('hex');
+  const record = db.redeemCodes.find((item) => item.codeHash === codeHash);
+  if (!record || record.disabled || (record.expiresAt && Date.parse(record.expiresAt) < Date.now())) return res.status(400).json({ error: 'This code is invalid or expired.' });
+  record.claims ??= [];
+  if (record.claims.some((claim) => claim.userId === req.bayonUser.id)) return res.status(409).json({ error: 'This code has already been used on your account.' });
+  if (record.claims.length >= record.maxClaims) return res.status(409).json({ error: 'This code has reached its claim limit.' });
+  const amount = Number(record.amount);
+  if (!Number.isSafeInteger(amount) || amount < 1 || req.bayonUser.bacoins + amount > Number.MAX_SAFE_INTEGER) return res.status(400).json({ error: 'This code is not configured correctly.' });
+  record.claims.push({ userId: req.bayonUser.id, claimedAt: new Date().toISOString() });
+  req.bayonUser.bacoins += amount;
+  saveDb(db);
+  res.json({ user: publicBayonUser(req.bayonUser), credited: amount });
+});
+
+app.post('/api/store/auth/session', async (req, res) => {
+  const accessToken = req.body?.supabaseAccessToken;
+  if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 8192) return res.status(400).json({ error: 'Verify your email first.' });
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return res.status(503).json({ error: 'Email sign-in is not configured.' });
+  let response;
+  try {
+    response = await fetch(`${process.env.SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/user`, {
+      headers: { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch { return res.status(502).json({ error: 'Could not reach email verification service.' }); }
+  if (!response.ok) return res.status(401).json({ error: 'That email verification link is invalid or expired.' });
+  const identity = await response.json();
+  const email = typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : '';
+  if (!email || !identity.email_confirmed_at) return res.status(403).json({ error: 'Verify your email before signing in.' });
+  let user = db.users.find((candidate) => candidate.supabaseUserId === identity.id || [candidate.email, candidate.googleEmail].some((value) => typeof value === 'string' && value.toLowerCase() === email));
+  if (!user) {
+    const base = `e_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 10)}`;
+    let username = base;
+    let suffix = 1;
+    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
+    user = { id: `user-${crypto.randomUUID()}`, username, email, supabaseUserId: identity.id, emailVerifiedAt: identity.email_confirmed_at, createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
+    db.users.push(user);
+  }
+  user.email = email;
+  user.supabaseUserId = identity.id;
+  user.emailVerifiedAt ||= identity.email_confirmed_at;
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  user.ownedCosmetics ??= [];
+  saveDb(db);
+  res.json({ token: jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' }), user: publicBayonUser(user) });
+});
+
+app.post('/api/store/cosmetics/:id/purchase', authenticatedUser, (req, res) => {
+  const cosmetic = db.cosmetics.find((item) => item.id === req.params.id && item.active !== false);
+  if (!cosmetic) return res.status(404).json({ error: 'Cosmetic not found.' });
+  req.bayonUser.ownedCosmetics ??= [];
+  if (req.bayonUser.ownedCosmetics.includes(cosmetic.id)) return res.status(409).json({ error: 'You already own this cosmetic.' });
+  if (req.bayonUser.bacoins < cosmetic.price) return res.status(400).json({ error: 'Not enough Bacoins. Redeem a code in the web store first.' });
+  req.bayonUser.bacoins -= cosmetic.price;
+  req.bayonUser.ownedCosmetics.push(cosmetic.id);
+  saveDb(db);
+  res.json({ user: publicBayonUser(req.bayonUser), cosmetic });
+});
+
+function requireAdmin(req, res, next) {
+  try {
+    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.admin !== true) throw new Error('not admin');
+    next();
+  } catch { res.status(401).json({ error: 'Admin sign-in required.' }); }
+}
+
+app.post('/api/admin/session', (req, res) => {
+  const supplied = typeof req.body?.secret === 'string' ? Buffer.from(req.body.secret) : Buffer.alloc(0);
+  const expected = Buffer.from(adminSecret);
+  if (!adminSecret || supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return res.status(401).json({ error: 'Invalid admin key.' });
+  res.json({ token: jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '8h' }) });
+});
+
+app.get('/api/admin/cosmetics', requireAdmin, (_req, res) => res.json({ cosmetics: db.cosmetics }));
+app.put('/api/admin/cosmetics', requireAdmin, (req, res) => {
+  const { id, name, description, category, price, accent, modelUrl, active } = req.body || {};
+  if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,48}$/.test(id) || typeof name !== 'string' || name.trim().length < 2 || name.length > 60 || typeof description !== 'string' || description.length > 300 || typeof category !== 'string' || category.length > 40 || !Number.isSafeInteger(Number(price)) || Number(price) < 0 || Number(price) > 1_000_000 || typeof accent !== 'string' || !/^#[\da-fA-F]{6}$/.test(accent) || (modelUrl && (typeof modelUrl !== 'string' || !modelUrl.startsWith('/media/cosmetics/')))) return res.status(400).json({ error: 'Check the cosmetic fields and try again.' });
+  const cosmetic = { id, name: name.trim(), description: description.trim(), category: category.trim(), price: Number(price), accent, modelUrl: modelUrl || null, active: active !== false };
+  const index = db.cosmetics.findIndex((item) => item.id === id);
+  if (index < 0) db.cosmetics.push(cosmetic); else db.cosmetics[index] = cosmetic;
+  saveDb(db);
+  res.json({ cosmetic });
+});
+app.delete('/api/admin/cosmetics/:id', requireAdmin, (req, res) => {
+  db.cosmetics = db.cosmetics.filter((item) => item.id !== req.params.id);
+  saveDb(db);
+  res.json({ success: true });
+});
+app.post('/api/admin/redeem-codes', requireAdmin, (req, res) => {
+  const amount = Number(req.body?.amount);
+  const maxClaims = Number(req.body?.maxClaims ?? 1);
+  const count = Number(req.body?.count ?? 1);
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000 || !Number.isSafeInteger(maxClaims) || maxClaims < 1 || maxClaims > 10_000 || !Number.isSafeInteger(count) || count < 1 || count > 100) return res.status(400).json({ error: 'Bacoins, claim limit, or count is out of range.' });
+  const codes = Array.from({ length: count }, () => {
+    const code = `BAYON-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+    db.redeemCodes.push({ codeHash: crypto.createHash('sha256').update(code).digest('hex'), amount, maxClaims, claims: [], createdAt: new Date().toISOString() });
+    return code;
+  });
+  saveDb(db);
+  res.status(201).json({ codes, amount, maxClaims });
+});
+app.post('/api/admin/assets', requireAdmin, (req, res) => {
+  const { fileName, mimeType, base64 } = req.body || {};
+  const allowed = { 'model/gltf-binary': '.glb', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+  if (!allowed[mimeType] || typeof base64 !== 'string' || base64.length > 16_800_000) return res.status(400).json({ error: 'Upload a GLB model or PNG, JPG, or WEBP image smaller than 12 MB.' });
+  const bytes = Buffer.from(base64, 'base64');
+  if (!bytes.length || bytes.length > 12 * 1024 * 1024 || (mimeType === 'model/gltf-binary' && bytes.subarray(0, 4).toString() !== 'glTF')) return res.status(400).json({ error: 'The uploaded file is invalid or too large.' });
+  const id = crypto.randomBytes(16).toString('hex');
+  const ext = allowed[mimeType];
+  fs.writeFileSync(path.join(mediaDirectory, `${id}${ext}`), bytes, { flag: 'wx' });
+  res.status(201).json({ url: `/media/cosmetics/${id}${ext}`, name: path.basename(String(fileName || 'asset'), ext) });
+});
+
+app.get(adminPanelPath || '/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
 
 app.get('/api/bacoins/me', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser) });
@@ -523,7 +668,7 @@ app.post('/api/bacoins/redeem', authenticatedUser, requireLinkedOfflineProfile, 
 });
 
 app.post('/api/cosmetics/:id/purchase', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
-  const cosmetic = cosmeticCatalog.find((item) => item.id === req.params.id);
+  const cosmetic = db.cosmetics.find((item) => item.id === req.params.id && item.active !== false);
   if (!cosmetic) return res.status(404).json({ error: 'Cosmetic not found.' });
   if (req.bayonUser.ownedCosmetics.includes(cosmetic.id)) return res.status(409).json({ error: 'You already own this cosmetic.' });
   if (req.bayonUser.bacoins < cosmetic.price) return res.status(400).json({ error: 'You do not have enough Bacoins.' });
@@ -746,5 +891,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Bayon Server] Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`[Bayon Server] Friends API:  http://0.0.0.0:${PORT}/api/friends`);
   console.log(`[Bayon Server] Servers API:  http://0.0.0.0:${PORT}/api/servers`);
+  if (adminPanelPath) console.log(`[Bayon Server] Private store admin route: ${adminPanelPath}`);
 });
 

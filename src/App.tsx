@@ -46,7 +46,7 @@ import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate 
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
-import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, requestEmailSignInCode, verifyEmailSignInCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
+import { betaBacoinsSignIn, clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
@@ -222,46 +222,30 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [editionOpen, setEditionOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [emailBusy, setEmailBusy] = useState(false);
-  const [emailError, setEmailError] = useState('');
-  const [emailNotice, setEmailNotice] = useState('');
+  const [betaBusy, setBetaBusy] = useState(false);
+  const [betaNotice, setBetaNotice] = useState('');
   const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
 
   useEffect(() => {
     const refreshIdentity = () => setBacoinsIdentity(getBacoinsIdentity());
-    const openEmailSignIn = () => { setEditionOpen(true); setEmailError(''); setEmailNotice(''); };
+    const openBacoinsMenu = () => { setEditionOpen(true); setBetaNotice(''); };
     window.addEventListener('bayon:bacoins-auth-changed', refreshIdentity);
-    window.addEventListener('bayon:open-email-sign-in', openEmailSignIn);
+    window.addEventListener('bayon:open-bacoins-menu', openBacoinsMenu);
     return () => {
       window.removeEventListener('bayon:bacoins-auth-changed', refreshIdentity);
-      window.removeEventListener('bayon:open-email-sign-in', openEmailSignIn);
+      window.removeEventListener('bayon:open-bacoins-menu', openBacoinsMenu);
     };
   }, []);
 
-  const requestEmailCode = async () => {
-    if (!activeAccount) { setEmailError('Select an offline Minecraft profile first.'); return; }
-    setEmailBusy(true); setEmailError(''); setEmailNotice('');
+  const enableBetaBacoins = async () => {
+    if (!activeAccount) { setBetaNotice('Select an offline Minecraft profile first.'); return; }
+    setBetaBusy(true); setBetaNotice('');
     try {
-      const result = await requestEmailSignInCode(email);
-      setCodeSent(true); setEmailNotice(result.message || 'Check your inbox for the verification code.');
-    } catch (cause) { setEmailError(cause instanceof Error ? cause.message : 'Could not send the email code.'); }
-    finally { setEmailBusy(false); }
-  };
-
-  const verifyEmailCode = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!activeAccount) { setEmailError('Select an offline Minecraft profile first.'); return; }
-    setEmailBusy(true); setEmailError(''); setEmailNotice('');
-    try {
-      await verifyEmailSignInCode(email, verificationCode, activeAccount.id, activeAccount.username);
-      setBacoinsIdentity(getBacoinsIdentity()); setCodeSent(false); setVerificationCode(''); setEmailNotice('Email verified and linked to this profile.');
-      setEditionOpen(false);
-    } catch (cause) { setEmailError(cause instanceof Error ? cause.message : 'Could not verify that code.'); }
-    finally { setEmailBusy(false); }
+      await betaBacoinsSignIn(activeAccount.id, activeAccount.username);
+      setBacoinsIdentity(getBacoinsIdentity()); setBetaNotice('Beta Bacoins enabled for this offline profile.');
+    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not enable beta Bacoins.'); }
+    finally { setBetaBusy(false); }
   };
 
   return (
@@ -286,26 +270,20 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select edition-select" onClick={() => setEditionOpen(!editionOpen)}>
             <span className="edition-cube"><KeyRound className="h-3.5 w-3.5" /></span>
-            <span className="title-select-copy"><strong>Sign in Email</strong><small>Bacoins account</small></span>
+            <span className="title-select-copy"><strong>Bacoins Beta</strong><small>Test account</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
           {editionOpen && <div className="title-popover email-auth-popover">
-            <strong>Bacoins email sign-in</strong>
-            {bacoinsIdentity?.email ? <>
-              <span>Signed in as {bacoinsIdentity.email}</span>
-              <span>Bacoins access is limited to offline profiles linked to this email account.</span>
-              <button type="button" onClick={() => { clearBacoinsToken(); setCodeSent(false); setVerificationCode(''); setEmailNotice(''); }}>Sign out</button>
+            <strong>Beta Bacoins</strong>
+            {bacoinsIdentity ? <>
+              <span>Signed in as {bacoinsIdentity.email || bacoinsIdentity.username || activeAccount?.username}</span>
+              <span>This beta balance is connected to your selected offline profile.</span>
+              <button type="button" onClick={() => { clearBacoinsToken(); setBacoinsIdentity(null); setBetaNotice(''); }}>Sign out</button>
             </> : <>
-              <span>Verify your email to link {activeAccount?.username ?? 'your offline profile'} and use Bacoins.</span>
-              <label>Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={emailBusy || codeSent} /></label>
-              {!codeSent ? <button type="button" onClick={() => void requestEmailCode()} disabled={emailBusy || !activeAccount}>{emailBusy ? 'Sending code…' : 'Send verification code'}</button> : <form onSubmit={(event) => void verifyEmailCode(event)}>
-                <label>Email verification code<input inputMode="numeric" autoComplete="one-time-code" maxLength={8} pattern="[0-9]{6,8}" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="Enter code" required /></label>
-                <button type="submit" disabled={emailBusy || verificationCode.length < 6 || verificationCode.length > 8}>{emailBusy ? 'Verifying…' : 'Verify and link'}</button>
-                <button type="button" onClick={() => { setCodeSent(false); setVerificationCode(''); setEmailNotice(''); }}>Use another email</button>
-              </form>}
-              {emailError && <span className="email-auth-error" role="alert">{emailError}</span>}
-              {emailNotice && <span className="email-auth-notice" role="status">{emailNotice}</span>}
-              <small>Supabase sends a one-time code. Bayon never asks for your email password.</small>
+              <span>Enable beta Bacoins for {activeAccount?.username ?? 'your offline profile'} to redeem codes and test cosmetic purchases.</span>
+              <button type="button" onClick={() => void enableBetaBacoins()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Connecting…' : 'Enable beta Bacoins'}</button>
+              {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
+              <small>Email verification is disabled for the Bayon Client beta. This test sign-in is tied to your active offline profile.</small>
             </>}
           </div>}
         </div>
@@ -725,7 +703,7 @@ function StorePage() {
 
       {!signedIn ? <GlassCard className="mb-5 flex flex-wrap items-center justify-between gap-5 p-5">
         <div><h2 className="font-semibold">Sign in with email</h2><p className="mt-1 text-xs text-white/45">Use the Minecraft Java Edition menu to verify your email and connect {activeAccount?.username ?? 'an offline profile'}.</p></div>
-        <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-email-sign-in'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open email sign-in</button>
+        <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-bacoins-menu'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open beta Bacoins</button>
       </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
         <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
         <GlassCard className="flex flex-wrap items-center justify-between gap-5 p-5"><div><strong className="block">Signed in as {user?.email ?? getBacoinsIdentity()?.email ?? user?.username}</strong><span className="mt-1 block text-xs text-white/45">Connected to Minecraft profile {activeAccount?.username ?? ''}. Manage sign-in in the Minecraft Java Edition menu.</span></div></GlassCard>
