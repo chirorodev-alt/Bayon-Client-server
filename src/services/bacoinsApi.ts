@@ -3,7 +3,7 @@ import { BACKEND_BASE_URL } from './backendConfig';
 const TOKEN_KEY = 'bayon-bacoins-token';
 const IDENTITY_KEY = 'bayon-bacoins-identity';
 
-export type BacoinsUser = { id: string; username: string; email?: string; bacoins: number; ownedCosmetics: string[]; equippedCosmetic: string | null };
+export type BacoinsUser = { id: string; username: string; email?: string; betaContactEmail?: string; bacoins: number; ownedCosmetics: string[]; equippedCosmetic: string | null };
 export type Cosmetic = { id: string; name: string; description: string; category: string; price: number; accent: string };
 
 export function getBacoinsToken() {
@@ -17,12 +17,12 @@ export function clearBacoinsToken() {
 }
 
 export function getBacoinsIdentity() {
-  try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null') as { email?: string; username?: string; betaMode?: boolean } | null; }
+  try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null') as { email?: string; contactEmail?: string; username?: string; betaMode?: boolean } | null; }
   catch { return null; }
 }
 
 function saveBacoinsIdentity(user: BacoinsUser) {
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ email: user.email, username: user.username }));
+  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ email: user.email, contactEmail: user.betaContactEmail, username: user.username }));
   window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
 }
 
@@ -50,9 +50,26 @@ export async function betaBacoinsSignIn(profileId: string, profileUsername: stri
     method: 'POST', body: JSON.stringify({ profileId, username: profileUsername }),
   }, false);
   localStorage.setItem(TOKEN_KEY, result.token);
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ username: result.user.username, betaMode: true }));
+  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ username: result.user.username, contactEmail: result.user.betaContactEmail, betaMode: true }));
   window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
   return result.user;
+}
+
+export function createBacoinsPairingCode(profileId: string) {
+  return request<{ code: string; expiresAt: string }>('/api/auth/bacoins/beta/pairing-code', {
+    method: 'POST', headers: { 'X-Bayon-Offline-Profile': profileId },
+  });
+}
+
+export function saveBacoinsContactEmail(profileId: string, email: string) {
+  return request<{ contactEmail: string | null }>('/api/auth/bacoins/beta/contact-email', {
+    method: 'PUT', body: JSON.stringify({ email }), headers: { 'X-Bayon-Offline-Profile': profileId },
+  }).then((result) => {
+    const identity = getBacoinsIdentity();
+    if (identity) localStorage.setItem(IDENTITY_KEY, JSON.stringify({ ...identity, contactEmail: result.contactEmail || undefined }));
+    window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
+    return result;
+  });
 }
 
 export async function authenticateBacoins(path: '/api/auth/register' | '/api/auth/login', username: string, password: string) {

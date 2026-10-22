@@ -46,7 +46,7 @@ import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate 
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
-import { betaBacoinsSignIn, clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
+import { betaBacoinsSignIn, clearBacoinsToken, createBacoinsPairingCode, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, saveBacoinsContactEmail, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
@@ -224,11 +224,17 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [betaBusy, setBetaBusy] = useState(false);
   const [betaNotice, setBetaNotice] = useState('');
+  const [websitePairingCode, setWebsitePairingCode] = useState('');
   const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
+  const [betaContactEmail, setBetaContactEmail] = useState(bacoinsIdentity?.contactEmail ?? '');
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
 
   useEffect(() => {
-    const refreshIdentity = () => setBacoinsIdentity(getBacoinsIdentity());
+    const refreshIdentity = () => {
+      const identity = getBacoinsIdentity();
+      setBacoinsIdentity(identity);
+      setBetaContactEmail(identity?.contactEmail ?? '');
+    };
     const openBacoinsMenu = () => { setEditionOpen(true); setBetaNotice(''); };
     window.addEventListener('bayon:bacoins-auth-changed', refreshIdentity);
     window.addEventListener('bayon:open-bacoins-menu', openBacoinsMenu);
@@ -245,6 +251,28 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
       await betaBacoinsSignIn(activeAccount.id, activeAccount.username);
       setBacoinsIdentity(getBacoinsIdentity()); setBetaNotice('Beta Bacoins enabled for this offline profile.');
     } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not enable beta Bacoins.'); }
+    finally { setBetaBusy(false); }
+  };
+
+  const generateWebsiteCode = async () => {
+    if (!activeAccount) { setBetaNotice('Select the offline profile connected to your Bacoins account.'); return; }
+    setBetaBusy(true); setBetaNotice(''); setWebsitePairingCode('');
+    try {
+      const result = await createBacoinsPairingCode(activeAccount.id);
+      setWebsitePairingCode(result.code);
+      setBetaNotice(`Code expires at ${new Date(result.expiresAt).toLocaleTimeString()}. Use it once on the Bayon Store website.`);
+    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not generate a website sign-in code.'); }
+    finally { setBetaBusy(false); }
+  };
+
+  const saveBetaEmail = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeAccount) { setBetaNotice('Select the offline profile connected to this Bacoins account.'); return; }
+    setBetaBusy(true); setBetaNotice('');
+    try {
+      await saveBacoinsContactEmail(activeAccount.id, betaContactEmail);
+      setBetaNotice('Email saved without verification. It is not used to sign in or recover your account.');
+    } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not save your email.'); }
     finally { setBetaBusy(false); }
   };
 
@@ -278,6 +306,15 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
             {bacoinsIdentity ? <>
               <span>Signed in as {bacoinsIdentity.email || bacoinsIdentity.username || activeAccount?.username}</span>
               <span>This beta balance is connected to your selected offline profile.</span>
+              <form onSubmit={(event) => void saveBetaEmail(event)}>
+                <label htmlFor="beta-contact-email">Email (optional)</label>
+                <input id="beta-contact-email" type="email" autoComplete="email" value={betaContactEmail} onChange={(event) => setBetaContactEmail(event.target.value)} placeholder="you@example.com" />
+                <button type="submit" disabled={betaBusy}>{betaBusy ? 'Saving…' : betaContactEmail ? 'Save email' : 'Add email'}</button>
+                <small>This is saved as unverified contact info. No email is sent, and it cannot be used to sign in.</small>
+              </form>
+              <button type="button" onClick={() => void generateWebsiteCode()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Generating…' : 'Generate website sign-in code'}</button>
+              {websitePairingCode && <><code className="email-auth-notice" style={{ userSelect: 'text', fontSize: 13, letterSpacing: 1 }}>{websitePairingCode}</code><button type="button" onClick={() => { void (async () => { try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(websitePairingCode); setBetaNotice('Code copied. It can be used once before it expires.'); } catch { setBetaNotice('Copy failed. Select and copy the code above.'); } })(); }}>Copy code</button></>}
+              {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
               <button type="button" onClick={() => { clearBacoinsToken(); setBacoinsIdentity(null); setBetaNotice(''); }}>Sign out</button>
             </> : <>
               <span>Enable beta Bacoins for {activeAccount?.username ?? 'your offline profile'} to redeem codes and test cosmetic purchases.</span>
@@ -702,7 +739,7 @@ function StorePage() {
       {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
 
       {!signedIn ? <GlassCard className="mb-5 flex flex-wrap items-center justify-between gap-5 p-5">
-        <div><h2 className="font-semibold">Sign in with email</h2><p className="mt-1 text-xs text-white/45">Use the Minecraft Java Edition menu to verify your email and connect {activeAccount?.username ?? 'an offline profile'}.</p></div>
+        <div><h2 className="font-semibold">Connect Bayon Client</h2><p className="mt-1 text-xs text-white/45">Enable beta Bacoins from the top-right menu. Generate a one-time code there to sign in to the website.</p></div>
         <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-bacoins-menu'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open beta Bacoins</button>
       </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
         <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
@@ -868,9 +905,9 @@ function AccountsPage() {
             <button type="button" onClick={() => { setError(''); setCreateOpen(true); }}>Create</button>
           </GlassCard>
           <GlassCard className="account-type-card account-microsoft-card">
-            <div className="account-type-icon"><Globe className="h-5 w-5" /></div>
-            <div><strong>Email account</strong><p>Verify an email address to sync this offline profile's Bacoins and cosmetics.</p></div>
-            <button type="button" onClick={() => navigate('/store')}>Connect</button>
+            <div className="account-type-icon"><Coins className="h-5 w-5" /></div>
+            <div><strong>Bacoins Beta</strong><p>Connect your offline profile to redeem codes and sync cosmetics without email verification.</p></div>
+            <button type="button" onClick={() => navigate('/store')}>Open Store</button>
           </GlassCard>
         </div>
         <GlassCard className="account-list-card">

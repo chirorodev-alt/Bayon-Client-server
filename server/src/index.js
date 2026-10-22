@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serversFile = path.join(__dirname, '..', 'data', 'servers.json');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bayon-client-super-secret-key-change-in-production';
 
@@ -28,7 +29,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Bayon-Offline-Profile'],
   })
 );
 
@@ -36,6 +37,7 @@ app.use(express.json({ limit: '18mb' }));
 
 // Load in-memory DB state with file sync
 let db = loadDb();
+const storePairAttempts = new Map();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store.html')));
@@ -271,68 +273,6 @@ app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
 });
 
-app.get('/api/auth/supabase/config', (_req, res) => {
-  const url = process.env.SUPABASE_URL?.replace(/\/+$/, '') || '';
-  const anonKey = process.env.SUPABASE_ANON_KEY || '';
-  res.json({ configured: Boolean(url && anonKey), url: url || null, anonKey: anonKey || null });
-});
-
-app.post('/api/auth/supabase/link', async (req, res) => {
-  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
-  const anonKey = process.env.SUPABASE_ANON_KEY;
-  const accessToken = req.body?.supabaseAccessToken;
-  const profileId = req.body?.offlineProfileId;
-  const profileUsername = req.body?.offlineUsername;
-  if (!supabaseUrl || !anonKey) return res.status(503).json({ error: 'Supabase Auth is not configured on the Bayon server yet.' });
-  if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 8192) return res.status(400).json({ error: 'Supabase sign-in did not return a valid session.' });
-  if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
-    return res.status(400).json({ error: 'Create or select an offline Minecraft profile first.' });
-  }
-
-  let authResponse;
-  try {
-    authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-    });
-  } catch {
-    return res.status(502).json({ error: 'Bayon could not reach Supabase Auth. Check the Supabase project URL.' });
-  }
-  if (!authResponse.ok) return res.status(401).json({ error: 'Supabase could not verify this session. Request a new email link and try again.' });
-  const identity = await authResponse.json();
-  const email = typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : '';
-  if (!email || !identity.email_confirmed_at) return res.status(403).json({ error: 'Verify this email in Supabase before connecting your profile.' });
-
-  let user = db.users.find((candidate) => [candidate.email, candidate.googleEmail].some((value) => typeof value === 'string' && value.toLowerCase() === email));
-  let isNewUser = false;
-  if (!user) {
-    const base = `e_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 10)}`;
-    let username = base;
-    let suffix = 1;
-    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
-    user = {
-      id: `user-${crypto.randomUUID()}`, username, email, emailVerifiedAt: identity.email_confirmed_at, supabaseUserId: identity.id, status: 'online',
-      avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(username)}`, createdAt: new Date().toISOString(),
-      bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [],
-    };
-    isNewUser = true;
-  }
-  try {
-    linkOfflineProfileToUser(user, profileId, profileUsername);
-  } catch (err) {
-    return res.status(err.statusCode || 409).json({ error: err.message || 'Could not connect this offline profile.' });
-  }
-  user.email = email;
-  user.emailVerifiedAt ||= identity.email_confirmed_at;
-  user.supabaseUserId = identity.id;
-  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
-  user.ownedCosmetics = Array.isArray(user.ownedCosmetics) ? user.ownedCosmetics : [];
-  user.status = 'online';
-  if (isNewUser) db.users.push(user);
-  saveDb(db);
-  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, user: publicBayonUser(user) });
-});
-
 async function verifyGoogleCredential(credential) {
   if (!process.env.GOOGLE_CLIENT_ID) throw new Error('Google Sign-In is not configured on the Bayon server.');
   if (typeof credential !== 'string' || credential.length > 10_000) throw new Error('Google did not return a valid sign-in credential.');
@@ -497,6 +437,26 @@ app.post('/api/auth/bacoins/beta', (req, res) => {
   res.json({ success: true, betaMode: true, token, user: publicBayonUser(user) });
 });
 
+app.post('/api/auth/bacoins/beta/pairing-code', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
+  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
+  const code = `BAYON-LINK-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  db.betaPairingCodes ??= [];
+  db.betaPairingCodes = db.betaPairingCodes.filter((item) => Date.parse(item.expiresAt) > Date.now());
+  db.betaPairingCodes.push({ codeHash: crypto.createHash('sha256').update(code).digest('hex'), userId: req.bayonUser.id, expiresAt });
+  saveDb(db);
+  res.json({ code, expiresAt });
+});
+
+app.put('/api/auth/bacoins/beta/contact-email', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
+  if (process.env.BACOIN_BETA_MODE !== 'true') return res.status(404).json({ error: 'Bayon Client beta Bacoins sign-in is disabled.' });
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : null;
+  if (email === null || email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return res.status(400).json({ error: 'Enter a valid email address or leave the field blank.' });
+  req.bayonUser.betaContactEmail = email || null;
+  saveDb(db);
+  res.json({ contactEmail: req.bayonUser.betaContactEmail });
+});
+
 app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile, async (req, res) => {
   try {
     const identity = await exchangeGoogleAuthorization(req.body || {});
@@ -512,14 +472,10 @@ app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile
 });
 
 function publicBayonUser(user) {
-  return { id: user.id, username: user.username, email: user.email || user.googleEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
+  return { id: user.id, username: user.username, email: user.email || user.googleEmail || undefined, betaContactEmail: user.betaContactEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
 }
 
 app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: db.cosmetics.filter((item) => item.active !== false) }));
-
-app.get('/api/store/config', (_req, res) => {
-  res.json({ supabaseUrl: process.env.SUPABASE_URL || null, supabaseAnonKey: process.env.SUPABASE_ANON_KEY || null });
-});
 
 app.get('/api/store/me', authenticatedUser, (_req, res) => res.json({ user: publicBayonUser(_req.bayonUser) }));
 app.post('/api/store/redeem', authenticatedUser, (req, res) => {
@@ -539,33 +495,23 @@ app.post('/api/store/redeem', authenticatedUser, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser), credited: amount });
 });
 
-app.post('/api/store/auth/session', async (req, res) => {
-  const accessToken = req.body?.supabaseAccessToken;
-  if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 8192) return res.status(400).json({ error: 'Verify your email first.' });
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return res.status(503).json({ error: 'Email sign-in is not configured.' });
-  let response;
-  try {
-    response = await fetch(`${process.env.SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/user`, {
-      headers: { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch { return res.status(502).json({ error: 'Could not reach email verification service.' }); }
-  if (!response.ok) return res.status(401).json({ error: 'That email verification link is invalid or expired.' });
-  const identity = await response.json();
-  const email = typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : '';
-  if (!email || !identity.email_confirmed_at) return res.status(403).json({ error: 'Verify your email before signing in.' });
-  let user = db.users.find((candidate) => candidate.supabaseUserId === identity.id || [candidate.email, candidate.googleEmail].some((value) => typeof value === 'string' && value.toLowerCase() === email));
-  if (!user) {
-    const base = `e_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 10)}`;
-    let username = base;
-    let suffix = 1;
-    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
-    user = { id: `user-${crypto.randomUUID()}`, username, email, supabaseUserId: identity.id, emailVerifiedAt: identity.email_confirmed_at, createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
-    db.users.push(user);
-  }
-  user.email = email;
-  user.supabaseUserId = identity.id;
-  user.emailVerifiedAt ||= identity.email_confirmed_at;
+app.post('/api/store/auth/pair', (req, res) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const attempts = storePairAttempts.get(clientIp) || { count: 0, resetAt: now + 15 * 60 * 1000 };
+  if (attempts.resetAt <= now) { attempts.count = 0; attempts.resetAt = now + 15 * 60 * 1000; }
+  attempts.count += 1;
+  storePairAttempts.set(clientIp, attempts);
+  if (attempts.count > 15) return res.status(429).json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' });
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  if (!/^BAYON-LINK-[A-F0-9]{24}$/.test(code)) return res.status(400).json({ error: 'Enter the website sign-in code shown in Bayon Client.' });
+  db.betaPairingCodes ??= [];
+  const hash = crypto.createHash('sha256').update(code).digest('hex');
+  const index = db.betaPairingCodes.findIndex((item) => item.codeHash === hash && Date.parse(item.expiresAt) > Date.now());
+  if (index < 0) return res.status(400).json({ error: 'That code is invalid, expired, or already used. Generate a new one in Bayon Client.' });
+  const [pairing] = db.betaPairingCodes.splice(index, 1);
+  const user = db.users.find((candidate) => candidate.id === pairing.userId);
+  if (!user) { saveDb(db); return res.status(404).json({ error: 'Bayon account not found.' }); }
   user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
   user.ownedCosmetics ??= [];
   saveDb(db);
