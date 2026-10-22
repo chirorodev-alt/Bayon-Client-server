@@ -1,4 +1,42 @@
 {
   "users": [],
-  "friends": []
+  "friends": [],
+  "redeemCodes": [],
+  "cosmetics": [
+    {
+      "id": "ember-frame",
+      "name": "Ember Frame",
+      "description": "A warm ember colored profile frame.",
+      "category": "Profile frame",
+      "price": 250,
+      "accent": "#f97316"
+    },
+    {
+      "id": "ender-glow",
+      "name": "Ender Glow",
+      "description": "A violet glow for your Bayon profile.",
+      "category": "Profile effect",
+      "price": 400,
+      "accent": "#a855f7"
+    },
+    {
+      "id": "diamond-badge",
+      "name": "Diamond Badge",
+      "description": "Show off a polished diamond badge.",
+      "category": "Badge",
+      "price": 600,
+      "accent": "#38bdf8"
+    },
+    {
+      "id": "gold-name",
+      "name": "Golden Name",
+      "description": "A golden name treatment in the client.",
+      "category": "Name style",
+      "price": 800,
+      "accent": "#facc15"
+    }
+  ],
+  "betaPairingCodes": [],
+  "adminBacoinsAdjustments": [],
+  "cosmeticsInitialized": true
 }

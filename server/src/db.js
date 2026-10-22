@@ -12,6 +12,7 @@ const initialData = {
   redeemCodes: [],
   cosmetics: [],
   betaPairingCodes: [],
+  adminBacoinsAdjustments: [],
 };
 
 function ensureDir() {
@@ -34,6 +35,7 @@ export function loadDb() {
     data.redeemCodes ??= [];
     data.cosmetics ??= [];
     data.betaPairingCodes ??= [];
+    data.adminBacoinsAdjustments ??= [];
     return data;
   } catch (err) {
     console.error('Failed to read db file, using memory fallback:', err);

@@ -41,6 +41,8 @@ const storePairAttempts = new Map();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store.html')));
+app.get('/voxel-cave.svg', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'voxel-cave.svg')));
+app.get('/bayon-mark.png', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'bayon-mark.png')));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -263,6 +265,8 @@ if (!db.cosmeticsInitialized) {
   saveDb(db);
 }
 const adminSecret = process.env.BACOIN_ADMIN_KEY || '';
+const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase() || '';
+const adminPassword = process.env.ADMIN_PASSWORD || '';
 const adminPanelSecret = process.env.ADMIN_PANEL_SECRET || '';
 const adminPanelPath = adminPanelSecret ? `/admin-panel-${adminPanelSecret}` : '';
 const mediaDirectory = path.join(__dirname, '..', 'data', 'cosmetics');
@@ -271,6 +275,9 @@ app.use('/media/cosmetics', express.static(mediaDirectory, { fallthrough: false,
 
 app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
+});
+app.get('/api/auth/microsoft/config', (_req, res) => {
+  res.json({ clientId: process.env.MICROSOFT_CLIENT_ID || null });
 });
 
 async function verifyGoogleCredential(credential) {
@@ -472,7 +479,7 @@ app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile
 });
 
 function publicBayonUser(user) {
-  return { id: user.id, username: user.username, email: user.email || user.googleEmail || undefined, betaContactEmail: user.betaContactEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
+  return { id: user.id, username: user.username, email: user.email || user.googleEmail || user.microsoftEmail || undefined, betaContactEmail: user.betaContactEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
 }
 
 app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: db.cosmetics.filter((item) => item.active !== false) }));
@@ -504,14 +511,62 @@ app.post('/api/store/auth/pair', (req, res) => {
   storePairAttempts.set(clientIp, attempts);
   if (attempts.count > 15) return res.status(429).json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' });
   const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!/^BAYON-LINK-[A-F0-9]{24}$/.test(code)) return res.status(400).json({ error: 'Enter the website sign-in code shown in Bayon Client.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter the email saved in Bayon Client.' });
   db.betaPairingCodes ??= [];
   const hash = crypto.createHash('sha256').update(code).digest('hex');
   const index = db.betaPairingCodes.findIndex((item) => item.codeHash === hash && Date.parse(item.expiresAt) > Date.now());
   if (index < 0) return res.status(400).json({ error: 'That code is invalid, expired, or already used. Generate a new one in Bayon Client.' });
-  const [pairing] = db.betaPairingCodes.splice(index, 1);
+  const pairing = db.betaPairingCodes[index];
   const user = db.users.find((candidate) => candidate.id === pairing.userId);
   if (!user) { saveDb(db); return res.status(404).json({ error: 'Bayon account not found.' }); }
+  if (!user.betaContactEmail || user.betaContactEmail.toLowerCase() !== email) return res.status(401).json({ error: 'That email does not match the one saved for this Bayon profile.' });
+  db.betaPairingCodes.splice(index, 1);
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  user.ownedCosmetics ??= [];
+  saveDb(db);
+  res.json({ token: jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' }), user: publicBayonUser(user) });
+});
+
+app.post('/api/store/auth/microsoft', async (req, res) => {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const { code, codeVerifier, redirectUri } = req.body || {};
+  if (!clientId) return res.status(503).json({ error: 'Microsoft sign-in is not configured on the Bayon server.' });
+  if (typeof code !== 'string' || code.length > 4096 || typeof codeVerifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier) || typeof redirectUri !== 'string') return res.status(400).json({ error: 'Microsoft sign-in did not return a valid authorization response.' });
+  let callback;
+  try { callback = new URL(redirectUri); } catch { return res.status(400).json({ error: 'Invalid Microsoft sign-in callback.' }); }
+  if (callback.origin !== req.get('origin') || callback.pathname !== '/') return res.status(400).json({ error: 'Microsoft sign-in callback does not match this store.' });
+  let tokenData;
+  try {
+    const response = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: codeVerifier, scope: 'openid profile email User.Read' }),
+      signal: AbortSignal.timeout(12000),
+    });
+    tokenData = await response.json();
+    if (!response.ok || !tokenData.access_token) return res.status(401).json({ error: 'Microsoft could not complete sign-in. Check the app registration and try again.' });
+  } catch { return res.status(502).json({ error: 'Could not reach Microsoft sign-in.' }); }
+  let profile;
+  try {
+    const response = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName', { headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return res.status(401).json({ error: 'Microsoft did not provide a valid account profile.' });
+    profile = await response.json();
+  } catch { return res.status(502).json({ error: 'Could not read the Microsoft account profile.' }); }
+  if (typeof profile.id !== 'string' || !profile.id) return res.status(401).json({ error: 'Microsoft account ID is missing.' });
+  const email = typeof profile.mail === 'string' && profile.mail.includes('@') ? profile.mail.trim().toLowerCase() : typeof profile.userPrincipalName === 'string' && profile.userPrincipalName.includes('@') ? profile.userPrincipalName.trim().toLowerCase() : '';
+  let user = db.users.find((candidate) => candidate.microsoftSubject === profile.id);
+  if (!user && email) user = db.users.find((candidate) => [candidate.googleEmail, candidate.microsoftEmail, candidate.emailVerifiedAt ? candidate.email : null].some((value) => typeof value === 'string' && value.toLowerCase() === email));
+  if (!user) {
+    const base = `m_${crypto.createHash('sha256').update(profile.id).digest('hex').slice(0, 10)}`;
+    let username = base;
+    let suffix = 1;
+    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
+    user = { id: `user-${crypto.randomUUID()}`, username, status: 'online', createdAt: new Date().toISOString(), bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [] };
+    db.users.push(user);
+  }
+  user.microsoftSubject = profile.id;
+  if (email) user.microsoftEmail = email;
   user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
   user.ownedCosmetics ??= [];
   saveDb(db);
@@ -542,7 +597,13 @@ function requireAdmin(req, res, next) {
 app.post('/api/admin/session', (req, res) => {
   const supplied = typeof req.body?.secret === 'string' ? Buffer.from(req.body.secret) : Buffer.alloc(0);
   const expected = Buffer.from(adminSecret);
-  if (!adminSecret || supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return res.status(401).json({ error: 'Invalid admin key.' });
+  const keyMatches = Boolean(adminSecret && supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected));
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const password = typeof req.body?.password === 'string' ? Buffer.from(req.body.password) : Buffer.alloc(0);
+  const expectedEmail = Buffer.from(adminEmail);
+  const expectedPassword = Buffer.from(adminPassword);
+  const emailMatches = Boolean(adminEmail && adminPassword && email && Buffer.from(email).length === expectedEmail.length && crypto.timingSafeEqual(Buffer.from(email), expectedEmail) && password.length === expectedPassword.length && crypto.timingSafeEqual(password, expectedPassword));
+  if (!keyMatches && !emailMatches) return res.status(401).json({ error: 'Invalid admin credentials.' });
   res.json({ token: jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '8h' }) });
 });
 
@@ -573,6 +634,40 @@ app.post('/api/admin/redeem-codes', requireAdmin, (req, res) => {
   });
   saveDb(db);
   res.status(201).json({ codes, amount, maxClaims });
+});
+app.get('/api/admin/redeem-codes', requireAdmin, (_req, res) => {
+  const codes = db.redeemCodes.map((record) => {
+    const claims = Array.isArray(record.claims) ? record.claims.length : 0;
+    const expired = Boolean(record.expiresAt && Date.parse(record.expiresAt) < Date.now());
+    const status = record.disabled ? 'Disabled' : expired ? 'Expired' : claims >= Number(record.maxClaims) ? 'Fully claimed' : 'Active';
+    return { id: record.codeHash, amount: record.amount, maxClaims: record.maxClaims, claims, createdAt: record.createdAt, expiresAt: record.expiresAt || null, disabled: Boolean(record.disabled), status };
+  }).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  res.json({ codes });
+});
+app.patch('/api/admin/redeem-codes/:id', requireAdmin, (req, res) => {
+  if (!/^[a-f0-9]{64}$/.test(req.params.id) || typeof req.body?.disabled !== 'boolean') return res.status(400).json({ error: 'Invalid redeem code update.' });
+  const record = db.redeemCodes.find((item) => item.codeHash === req.params.id);
+  if (!record) return res.status(404).json({ error: 'Redeem code not found.' });
+  record.disabled = req.body.disabled;
+  saveDb(db);
+  res.json({ success: true });
+});
+app.get('/api/admin/users', requireAdmin, (_req, res) => {
+  const users = db.users.map((user) => ({ id: user.id, username: user.username, email: user.email || user.googleEmail || user.betaContactEmail || null, bacoins: Number(user.bacoins) || 0 }));
+  res.json({ users });
+});
+app.post('/api/admin/users/:id/bacoins', requireAdmin, (req, res) => {
+  const amount = Number(req.body?.amount);
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000) return res.status(400).json({ error: 'Enter an amount from 1 to 1,000,000.' });
+  const user = db.users.find((candidate) => candidate.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'Bayon account not found.' });
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  if (user.bacoins + amount > Number.MAX_SAFE_INTEGER) return res.status(400).json({ error: 'This account balance is too large to adjust.' });
+  user.bacoins += amount;
+  db.adminBacoinsAdjustments ??= [];
+  db.adminBacoinsAdjustments.push({ id: crypto.randomUUID(), userId: user.id, amount, createdAt: new Date().toISOString() });
+  saveDb(db);
+  res.json({ success: true, user: { id: user.id, username: user.username, bacoins: user.bacoins } });
 });
 app.post('/api/admin/assets', requireAdmin, (req, res) => {
   const { fileName, mimeType, base64 } = req.body || {};

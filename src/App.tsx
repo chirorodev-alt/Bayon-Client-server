@@ -246,10 +246,12 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
 
   const enableBetaBacoins = async () => {
     if (!activeAccount) { setBetaNotice('Select an offline Minecraft profile first.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(betaContactEmail.trim())) { setBetaNotice('Enter a valid email address first.'); return; }
     setBetaBusy(true); setBetaNotice('');
     try {
       await betaBacoinsSignIn(activeAccount.id, activeAccount.username);
-      setBacoinsIdentity(getBacoinsIdentity()); setBetaNotice('Beta Bacoins enabled for this offline profile.');
+      await saveBacoinsContactEmail(activeAccount.id, betaContactEmail.trim());
+      setBacoinsIdentity(getBacoinsIdentity()); setBetaNotice('Confirmed. Your email is saved and beta Bacoins is signed in.');
     } catch (cause) { setBetaNotice(cause instanceof Error ? cause.message : 'Could not enable beta Bacoins.'); }
     finally { setBetaBusy(false); }
   };
@@ -307,20 +309,22 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
               <span>Signed in as {bacoinsIdentity.email || bacoinsIdentity.username || activeAccount?.username}</span>
               <span>This beta balance is connected to your selected offline profile.</span>
               <form onSubmit={(event) => void saveBetaEmail(event)}>
-                <label htmlFor="beta-contact-email">Email (optional)</label>
+                <label htmlFor="beta-contact-email">Email address</label>
                 <input id="beta-contact-email" type="email" autoComplete="email" value={betaContactEmail} onChange={(event) => setBetaContactEmail(event.target.value)} placeholder="you@example.com" />
                 <button type="submit" disabled={betaBusy}>{betaBusy ? 'Saving…' : betaContactEmail ? 'Save email' : 'Add email'}</button>
-                <small>This is saved as unverified contact info. No email is sent, and it cannot be used to sign in.</small>
+                <small>Unverified contact info only. No email is sent; this address cannot sign in or recover the account.</small>
               </form>
               <button type="button" onClick={() => void generateWebsiteCode()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Generating…' : 'Generate website sign-in code'}</button>
               {websitePairingCode && <><code className="email-auth-notice" style={{ userSelect: 'text', fontSize: 13, letterSpacing: 1 }}>{websitePairingCode}</code><button type="button" onClick={() => { void (async () => { try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(websitePairingCode); setBetaNotice('Code copied. It can be used once before it expires.'); } catch { setBetaNotice('Copy failed. Select and copy the code above.'); } })(); }}>Copy code</button></>}
               {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
               <button type="button" onClick={() => { clearBacoinsToken(); setBacoinsIdentity(null); setBetaNotice(''); }}>Sign out</button>
             </> : <>
-              <span>Enable beta Bacoins for {activeAccount?.username ?? 'your offline profile'} to redeem codes and test cosmetic purchases.</span>
-              <button type="button" onClick={() => void enableBetaBacoins()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Connecting…' : 'Enable beta Bacoins'}</button>
+              <span>Connect Bacoins to offline profile <strong>{activeAccount?.username ?? 'not selected'}</strong>.</span>
+              <label htmlFor="beta-contact-email">Email address</label>
+              <input id="beta-contact-email" type="email" autoComplete="email" value={betaContactEmail} onChange={(event) => setBetaContactEmail(event.target.value)} placeholder="you@example.com" required />
+              <button type="button" onClick={() => void enableBetaBacoins()} disabled={betaBusy || !activeAccount}>{betaBusy ? 'Connecting…' : 'Confirm and enable'}</button>
               {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
-              <small>Email verification is disabled for the Bayon Client beta. This test sign-in is tied to your active offline profile.</small>
+              <small>No verification email is sent. The address is saved as unverified contact info; sign-in stays tied to this offline profile.</small>
             </>}
           </div>}
         </div>
