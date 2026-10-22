@@ -2,7 +2,7 @@
   "name": "bayon-client",
   "productName": "Bayon Client",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -12,6 +12,7 @@
     "electron": "node electron/run.js .",
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder --win",
+    "dist:publish": "npm run build && electron-builder --win --publish always",
     "dist:dir": "npm run build && electron-builder --win --dir",
     "test": "vitest run",
     "lint": "oxlint .",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "discord-rpc": "^4.0.1",
+    "electron-updater": "^6.8.9",
     "framer-motion": "^14.5.0",
     "lucide-react": "^1.61.0",
     "minecraft-launcher-core": "^3.18.2",
@@ -50,6 +52,14 @@
   "build": {
     "appId": "com.bayon.client",
     "productName": "Bayon Client",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "chirorodev-alt",
+        "repo": "Bayon-Client-server",
+        "releaseType": "release"
+      }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "public"
@@ -78,6 +88,7 @@
       "icon": "public/bayon-icon.ico"
     },
     "nsis": {
+      "artifactName": "Bayon-Client-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

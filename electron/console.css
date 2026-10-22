@@ -1,0 +1,28 @@
+:root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; background: #090b0e; color: #dce3ea; }
+* { box-sizing: border-box; }
+body { display: flex; height: 100vh; flex-direction: column; overflow: hidden; margin: 0; background: #090b0e; }
+.topbar { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #252d35; background: #10151b; padding: 10px 16px; }
+.brand, .toolbar { display: flex; align-items: center; gap: 12px; }
+.brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid #526b80; border-radius: 10px; background: #1b2b39; color: #d7e8f6; font-size: 18px; font-weight: 800; }
+.brand strong, .brand small { display: block; }
+.brand strong { font-size: 12px; letter-spacing: .1em; }
+.brand small { margin-top: 4px; color: #8997a4; font-size: 11px; }
+.toolbar { gap: 8px; }
+button, select { min-height: 32px; border: 1px solid #39444f; border-radius: 7px; background: #1b232b; padding: 6px 10px; color: #e2e9ef; font: inherit; font-size: 11px; }
+button { cursor: pointer; font-weight: 600; }
+button:hover, select:hover { border-color: #617688; background: #25313b; }
+.filter-label, .autoscroll { color: #aab5bf; font-size: 11px; }
+.autoscroll { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.autoscroll input { accent-color: #8ab6d9; }
+.close-button { border-color: #654343; background: #291b1b; }
+#logs { flex: 1; overflow: auto; padding: 10px 12px; font: 12px/1.55 Consolas, "Cascadia Code", monospace; }
+.log-entry { display: grid; grid-template-columns: 84px 88px 112px minmax(0, 1fr); gap: 9px; border-bottom: 1px solid #151a1f; padding: 3px 5px; }
+.log-time { color: #72808b; white-space: nowrap; }
+.log-level { color: #a8bbc9; text-transform: uppercase; }
+.log-source { overflow: hidden; color: #91a5b4; text-overflow: ellipsis; white-space: nowrap; }
+.log-message { overflow-wrap: anywhere; white-space: pre-wrap; color: #c6ced5; }
+.level-warn .log-level, .level-warn .log-message { color: #e4bf73; }
+.level-error { background: #241517; }
+.level-error .log-level, .level-error .log-source, .level-error .log-message { color: #f09b9b; }
+footer { display: flex; justify-content: space-between; gap: 14px; border-top: 1px solid #252d35; padding: 8px 14px; color: #798692; font-size: 10px; }
+@media (max-width: 760px) { .topbar { align-items: flex-start; flex-direction: column; } .toolbar { flex-wrap: wrap; } .log-entry { grid-template-columns: 70px 56px minmax(0, 1fr); } .log-source { display: none; } footer span:last-child { display: none; } }

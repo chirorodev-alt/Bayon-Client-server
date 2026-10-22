@@ -1,4 +1,4 @@
-import { useSettingsStore } from '../store/useSettingsStore';
+import { BACKEND_BASE_URL } from './backendConfig';
 
 export type FriendPresence = 'online' | 'offline' | 'in_game';
 
@@ -23,9 +23,7 @@ function isFriend(value: unknown): value is Friend {
 }
 
 export async function fetchFriends(signal?: AbortSignal): Promise<Friend[]> {
-  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
-  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends`, {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/friends`, {
     method: 'GET',
     credentials: 'include',
     headers: { Accept: 'application/json' },
@@ -45,9 +43,7 @@ export async function fetchFriends(signal?: AbortSignal): Promise<Friend[]> {
 }
 
 export async function addFriend(username: string): Promise<Friend> {
-  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
-  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends`, {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/friends`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -74,9 +70,7 @@ export async function addFriend(username: string): Promise<Friend> {
 }
 
 export async function removeFriend(id: string): Promise<void> {
-  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
-  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/friends/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/friends/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { Accept: 'application/json' },

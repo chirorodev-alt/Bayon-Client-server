@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bayon Client Game Console</title>
+  <link rel="stylesheet" href="console.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">B</span><div><strong>GAME CONSOLE</strong><small>Bayon Client · Minecraft and mod logs</small></div></div>
+    <div class="toolbar">
+      <label class="filter-label" for="level-filter">Show</label>
+      <select id="level-filter"><option value="all">All output</option><option value="error">Errors</option><option value="warn">Warnings</option></select>
+      <label class="autoscroll"><input id="autoscroll" type="checkbox" checked> Auto-scroll</label>
+      <button id="clear" type="button">Clear</button>
+      <button id="close" class="close-button" type="button">Close</button>
+    </div>
+  </header>
+  <main id="logs" aria-live="polite" aria-label="Game output"></main>
+  <footer><span id="line-count">Waiting for game output…</span><span>Errors from mods and Fabric are marked in red.</span></footer>
+  <script src="console.js"></script>
+</body>
+</html>

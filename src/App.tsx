@@ -2,11 +2,20 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { lazy, Suspense } from 'react';
 import {
   Bell,
+  Check,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Coffee,
+  Coins,
+  Gem,
+  LogOut,
   Radio,
+  Download,
   FileImage,
+  FileText,
   FolderOpen,
+  Gamepad2,
   Globe,
   HardDrive,
   ImagePlus,
@@ -18,11 +27,15 @@ import {
   Play,
   Plus,
   Search,
+  Sparkles,
+  Ticket,
+  RefreshCw,
   ShoppingCart,
   Settings,
   Shirt,
   Square,
   Trash2,
+  Terminal,
   UserRound,
   UsersRound,
   Volume2,
@@ -33,10 +46,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
-import { searchModCatalog, type ModCatalogResult, type ModCatalogSource } from './services/modCatalog';
+import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
+import { authenticateBacoins, clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
-import type { DiscordPresenceStatus, InstalledMod } from './types/electron';
+import { useProfileStore, type VersionProfile } from './store/useProfileStore';
+import type { AppUpdateState, ClientDirectories, DiscordPresenceStatus, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
 import bayonIcon from './assets/bayon-icon.png';
 
 const SkinModelPreview = lazy(() => import('./components/SkinModelPreview').then((module) => ({ default: module.SkinModelPreview })));
@@ -49,14 +64,6 @@ type NavItem = {
   icon: LucideIcon;
 };
 
-type SkinItem = {
-  id: number;
-  name: string;
-  type: 'Default' | 'Custom';
-  accent: string;
-  imageUrl?: string;
-};
-
 const navItems: NavItem[] = [
   { to: '/home', label: 'Play', icon: Play },
   { to: '/profiles', label: 'Profiles', icon: UserRound },
@@ -67,51 +74,63 @@ const navItems: NavItem[] = [
   { to: '/skins', label: 'Skins', icon: Shirt },
 ];
 
-const skinGallery: SkinItem[] = [
-  { id: 1, name: 'Default', type: 'Default', accent: 'from-zinc-200 to-zinc-500' },
-  { id: 2, name: 'Volcanic', type: 'Custom', accent: 'from-zinc-400 to-stone-600' },
-  { id: 3, name: 'Nightfall', type: 'Custom', accent: 'from-neutral-300 to-slate-600' },
-  { id: 4, name: 'Ashen', type: 'Custom', accent: 'from-white to-neutral-400' },
+const versions = ['26.3'];
+const modContentTabs: { id: ModrinthProjectType; label: string }[] = [
+  { id: 'mod', label: 'Mods' },
+  { id: 'modpack', label: 'Modpacks' },
+  { id: 'resourcepack', label: 'Resource Packs' },
+  { id: 'shader', label: 'Shaders' },
+  { id: 'datapack', label: 'Data Packs' },
 ];
+let minecraftVersionsRequest: Promise<string[]> | null = null;
 
-const versions = [
-  '1.21.4',
-  '1.21.3',
-  '1.21.2',
-  '1.21.1',
-  '1.21',
-  '1.20.6',
-  '1.20.5',
-  '1.20.4',
-  '1.20.3',
-  '1.20.2',
-  '1.20.1',
-  '1.20',
-  '1.19.4',
-  '1.19.3',
-  '1.19.2',
-  '1.19.1',
-  '1.19',
-  '1.18.2',
-  '1.18.1',
-  '1.18',
-  '1.17.1',
-  '1.17',
-  '1.16.5',
-  '1.16.4',
-  '1.16.3',
-  '1.16.2',
-  '1.16.1',
-  '1.16',
-  '1.15.2',
-  '1.15.1',
-  '1.15',
-  '1.14.4',
-  '1.14.3',
-  '1.14.2',
-  '1.14.1',
-  '1.14',
-];
+function useMinecraftVersions() {
+  const [availableVersions, setAvailableVersions] = useState(versions);
+  useEffect(() => {
+    let active = true;
+    if (!minecraftVersionsRequest) {
+      const request = window.electronAPI?.getMinecraftVersions
+        ? window.electronAPI.getMinecraftVersions()
+        : fetch('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json').then(async (response) => {
+          if (!response.ok) throw new Error('Minecraft version list unavailable.');
+          const manifest = await response.json() as { versions?: { id: string; type: string }[] };
+          return (manifest.versions ?? []).filter((version) => version.type === 'release').map((version) => version.id);
+        });
+      minecraftVersionsRequest = request
+        .then((items) => ['26.3', ...items].filter((item, index, list) => list.indexOf(item) === index))
+        .catch(() => versions);
+    }
+    void minecraftVersionsRequest.then((items) => { if (active) setAvailableVersions(items); });
+    return () => { active = false; };
+  }, []);
+
+  return availableVersions;
+}
+
+function MinecraftVersionDropdown({ value, onChange, availableVersions, compact = false }: { value: string; onChange: (version: string) => void; availableVersions: string[]; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const filteredVersions = availableVersions.filter((version) => version.toLowerCase().includes(query.trim().toLowerCase()));
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => { if (!dropdownRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('mousedown', closeOnOutsideClick); document.removeEventListener('keydown', closeOnEscape); };
+  }, [open]);
+  return <div ref={dropdownRef} className={`relative ${compact ? 'w-24 shrink-0' : 'w-full'}`}>
+    <button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => { setOpen((current) => !current); setQuery(''); }} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-[#111820] px-3 py-2.5 text-left text-sm text-white/85 transition hover:border-sky-400/40 hover:bg-[#15202b] focus:outline-none focus:ring-2 focus:ring-sky-400/30">
+      <span>{value}</span><ChevronDown className={`h-4 w-4 text-sky-200/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+    {open && <div className={`absolute top-full z-40 mt-2 overflow-hidden rounded-xl border border-sky-300/20 bg-[#0b121a] shadow-[0_18px_45px_rgba(0,0,0,.65)] ring-1 ring-white/5 ${compact ? 'left-0 w-64' : 'left-0 right-0'}`}>
+      <div className="flex items-center gap-2 border-b border-white/8 px-3 py-2.5"><Search className="h-4 w-4 shrink-0 text-sky-200/55" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Minecraft versions" className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-white/35" /></div>
+      <div role="listbox" aria-label="Minecraft releases" className="max-h-64 overflow-y-auto p-1.5">{filteredVersions.map((version) => <button type="button" role="option" aria-selected={value === version} key={version} onClick={() => { onChange(version); setOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition ${value === version ? 'bg-sky-400/15 text-sky-100' : 'text-white/70 hover:bg-white/7 hover:text-white'}`}><span>Minecraft {version}</span>{value === version && <span className="text-[9px] font-semibold uppercase tracking-wider text-sky-200">Selected</span>}</button>)}{filteredVersions.length === 0 && <div className="px-3 py-5 text-center text-xs text-white/40">No matching releases</div>}</div>
+      <div className="border-t border-white/8 px-3 py-2 text-[10px] text-white/35">Official Minecraft releases · {availableVersions.length} versions</div>
+    </div>}
+  </div>;
+}
 
 function App() {
   return (
@@ -123,6 +142,9 @@ function App() {
 
 function AppShell() {
   const [windowState, setWindowState] = useState<WindowState>('restored');
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: 'idle' });
+  const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const location = useLocation();
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const discordPresence = useSettingsStore((state) => state.discordPresence);
@@ -130,6 +152,14 @@ function AppShell() {
   useEffect(() => {
     const api = (window as Window & { electronAPI?: { onWindowStateChange: (cb: (state: WindowState) => void) => void } }).electronAPI;
     api?.onWindowStateChange((state) => setWindowState(state));
+  }, []);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+    const unsubscribe = api.onAppUpdateState(setAppUpdate);
+    api.getAppUpdateState().then(setAppUpdate).catch(() => {});
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -142,6 +172,10 @@ function AppShell() {
       });
     }
   }, [location.pathname, activeAccount?.username, discordPresence]);
+
+  const updateDismissKey = appUpdate.version || 'error';
+  const updateDialogVisible = ['available', 'downloading', 'downloaded', 'error'].includes(appUpdate.status)
+    && (appUpdate.status === 'downloaded' || dismissedUpdate !== updateDismissKey);
 
   return (
     <div className="app-shell bg-[#080a0d] text-white selection:bg-white/20">
@@ -158,14 +192,28 @@ function AppShell() {
                 <Route path="/mods" element={<ModsPage />} />
                 <Route path="/skins" element={<SkinsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/profiles" element={<PlaceholderPage title="Profiles" description="Manage your Minecraft versions, loaders, and launch configurations." />} />
+                <Route path="/profiles" element={<ProfilesPage />} />
                 <Route path="/accounts" element={<AccountsPage />} />
-                <Route path="/store" element={<PlaceholderPage title="Store" description="Cosmetics and profile upgrades are coming soon." />} />
+                <Route path="/store" element={<StorePage />} />
               </Routes>
             </AnimatePresence>
           </main>
         </div>
       </div>
+      {updateDialogVisible && <Modal title={appUpdate.status === 'downloaded' ? 'Update ready to install' : appUpdate.status === 'error' ? 'Update check failed' : 'Bayon Client update found'} onClose={() => setDismissedUpdate(updateDismissKey)}>
+        {appUpdate.status === 'downloaded' ? <>
+          <p className="settings-clear-warning">Bayon Client {appUpdate.version ? `v${appUpdate.version} ` : ''}has downloaded and is ready. Restart the client to finish updating.</p>
+          <div className="offline-form-actions"><button type="button" onClick={() => setDismissedUpdate(updateDismissKey)}>Later</button><button type="button" className="account-select-button" disabled={installingUpdate} onClick={() => { setInstallingUpdate(true); void window.electronAPI?.installAppUpdate().catch(() => setInstallingUpdate(false)); }}>{installingUpdate ? 'Restarting…' : 'Restart and update'}</button></div>
+        </> : appUpdate.status === 'error' ? <>
+          <p className="settings-clear-warning">{appUpdate.message || 'Could not check for a new version.'}</p>
+          <div className="offline-form-actions"><button type="button" onClick={() => setDismissedUpdate(updateDismissKey)}>Dismiss</button><button type="button" className="account-select-button" onClick={() => { setDismissedUpdate(null); void window.electronAPI?.checkForAppUpdate().then(setAppUpdate); }}>Try again</button></div>
+        </> : <>
+          <p className="settings-clear-warning">{appUpdate.version ? `Bayon Client v${appUpdate.version} is available.` : 'A new Bayon Client version is available.'} The update downloads in the background and installs inside the app.</p>
+          {appUpdate.status === 'downloading' && <div className="java-runtime-progress update-download-progress"><span style={{ width: `${Math.max(0, Math.min(100, appUpdate.percent ?? 0))}%` }} /></div>}
+          <p className="update-download-caption">{appUpdate.status === 'downloading' ? `${Math.round(appUpdate.percent ?? 0)}% downloaded` : appUpdate.message || 'Preparing update download…'}</p>
+          <div className="offline-form-actions"><button type="button" onClick={() => setDismissedUpdate(updateDismissKey)}>Later</button></div>
+        </>}
+      </Modal>}
     </div>
   );
 }
@@ -190,7 +238,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
       <div className="title-actions">
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select" onClick={() => setAccountOpen(!accountOpen)}>
-            <div className="avatar-mini">{activeAccount?.username.slice(0, 1).toUpperCase() ?? 'B'}</div>
+            <MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="avatar-mini" />
             <span className="title-select-copy"><strong>{activeAccount?.username ?? 'No account'}</strong><small>{activeAccount ? 'Offline account' : 'Not signed in'}</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
@@ -244,12 +292,12 @@ function Sidebar() {
 
       <div className="sidebar-bottom">
         <div className="sidebar-profile">
-          <div className="avatar-large">B</div>
+          <MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="avatar-large" />
           <div><strong>{activeAccount?.username ?? 'Local Player'}</strong><small>{activeAccount ? 'Offline account' : 'No account selected'}</small></div>
         </div>
         <div className="client-version">
           <LogoMark />
-          <span><strong>BAYON CLIENT</strong><small>v1.0.0</small></span>
+          <span><strong>BAYON CLIENT</strong><small>v1.0.1</small></span>
           <ChevronRight className="h-4 w-4" />
         </div>
       </div>
@@ -262,9 +310,12 @@ function HomePage() {
   const friendsState = useFriends();
   const serversState = useServers();
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
-  const [selectedVersion, setSelectedVersion] = useState('1.21.1');
-  const [selectedLoader, setSelectedLoader] = useState('Fabric');
-  const [profileMenu, setProfileMenu] = useState(false);
+  const profiles = useProfileStore((state) => state.profiles);
+  const activeProfileId = useProfileStore((state) => state.activeProfileId);
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+  const selectProfile = useProfileStore((state) => state.selectProfile);
+  const selectedVersion = activeProfile?.version ?? '26.3';
+  const selectedLoader = 'Fabric';
   const [loaderMenu, setLoaderMenu] = useState(false);
   const [launchProgress, setLaunchProgress] = useState(0);
   const [launchStatus, setLaunchStatus] = useState('Ready');
@@ -292,14 +343,20 @@ function HomePage() {
       setFriendAdding(false);
     }
   };
-  const startLaunchProcess = async () => {
+  const startLaunchProcess = async (profileToLaunch = activeProfile) => {
     if (launching) return;
+    if (!profileToLaunch) {
+      setLaunchStatus('Create a profile before launching.');
+      navigate('/profiles?create=1');
+      return;
+    }
+    const launchVersion = profileToLaunch.version;
     setLaunching(true);
     setLaunchProgress(5);
     setLaunchStatus('Initialising launchâ€¦');
     void window.electronAPI?.updateDiscordActivity({
-      state: `Launching ${selectedLoader} ${selectedVersion}`,
-      version: selectedVersion,
+      state: `Launching ${selectedLoader} ${launchVersion}`,
+      version: launchVersion,
       loader: selectedLoader,
     });
 
@@ -309,8 +366,8 @@ function HomePage() {
       if (data.progress === 0 || data.progress === 100) {
         setLaunching(false);
         void window.electronAPI?.updateDiscordActivity({
-          state: data.progress === 100 ? `Playing ${selectedVersion}` : undefined,
-          version: selectedVersion,
+          state: data.progress === 100 ? `Playing ${launchVersion}` : undefined,
+          version: launchVersion,
           loader: selectedLoader,
         });
       }
@@ -318,10 +375,14 @@ function HomePage() {
 
     try {
       await window.electronAPI?.launchMinecraft({
-        version: selectedVersion,
+        version: launchVersion,
         loader: selectedLoader,
+        profileName: profileToLaunch.name,
+        profileId: profileToLaunch.id,
         username: activeAccount?.username ?? 'Player',
         memory: settings.selectedRam ?? 4,
+        javaPath: settings.javaPath,
+        customArgs: settings.customArgs,
       });
     } catch (err) {
       setLaunchProgress(0);
@@ -345,12 +406,12 @@ function HomePage() {
             <p className="hero-caption">The best Minecraft launcher for your journey.</p>
             <button type="button" className="change-skin-button" onClick={() => navigate('/skins')}><Shirt className="h-4 w-4" /> Change Skin <ChevronRight className="h-4 w-4" /></button>
             <div className="play-control-wrap">
-              <button type="button" onClick={startLaunchProcess} className="launch-button" disabled={launching}>
+              <button type="button" onClick={() => void startLaunchProcess()} className="launch-button" disabled={launching}>
                 {launching ? <span className="launch-spinner" /> : <Play className="h-6 w-6 fill-current" />}
                 <span><strong>{launching ? `PREPARING ${launchProgress}%` : 'LAUNCH GAME'}</strong><small>{selectedVersion} - {selectedLoader}</small></span>
               </button>
               <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Select loader"><ChevronDown className="h-5 w-5" /></button>
-              {loaderMenu && <div className="hero-dropdown loader-dropdown">{['Vanilla', 'Forge', 'Fabric', 'Quilt'].map((loader) => <button type="button" key={loader} onClick={() => { setSelectedLoader(loader); setLoaderMenu(false); }}>{loader}</button>)}</div>}
+              {loaderMenu && <div className="hero-dropdown loader-dropdown"><button type="button" onClick={() => setLoaderMenu(false)}>Fabric</button></div>}
             </div>
             <div className="hero-status">
               <span>{launchStatus === 'Ready' ? 'Ready to prepare â€” launching the game is not connected.' : launchStatus}</span>
@@ -358,28 +419,16 @@ function HomePage() {
             </div>
             {launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
           </div>
+          <div className="home-profile-strip" aria-label="Game profiles">
+            {profiles.map((profile) => <div key={profile.id} className={`home-profile-card ${profile.id === activeProfileId ? 'home-profile-card-active' : ''}`}>
+              <button type="button" className="home-profile-select" onClick={() => selectProfile(profile.id)} aria-pressed={profile.id === activeProfileId}>
+                <span className="home-profile-icon"><Layers3 className="h-5 w-5" /></span><span className="home-profile-copy"><strong>{profile.name}</strong><small>Fabric {profile.version}</small></span>
+              </button>
+              <button type="button" className="home-profile-play" aria-label={`Launch ${profile.name}`} disabled={launching} onClick={() => { selectProfile(profile.id); void startLaunchProcess(profile); }}><Play className="h-4 w-4 fill-current" /></button>
+            </div>)}
+            <button type="button" className="home-profile-add" onClick={() => navigate('/profiles?create=1')}><Plus className="h-5 w-5" /><span>Add a Profile</span></button>
+          </div>
           <div className="dashboard-avatar" aria-hidden="true"><div className="pixel-head" /><div className="pixel-body">B</div><div className="pixel-legs" /></div>
-        </div>
-
-        <div className="quick-settings">
-          <div className="quick-setting">
-            <span className="quick-setting-icon minecraft-grass">â–§</span>
-            <div><small>Minecraft Version</small><strong>{selectedVersion}</strong></div>
-            <select aria-label="Minecraft version" value={selectedVersion} onChange={(event) => setSelectedVersion(event.target.value)}>{versions.map((version) => <option key={version}>{version}</option>)}</select>
-            <ChevronDown className="quick-chevron h-4 w-4" />
-          </div>
-          <div className="quick-setting profile-setting">
-            <div className="quick-setting-icon profile-silhouette"><UserRound className="h-5 w-5" /></div>
-            <div><small>Active Profile</small><strong>Default</strong></div>
-            <button type="button" onClick={() => setProfileMenu(!profileMenu)} aria-label="Select profile"><ChevronDown className="h-4 w-4" /></button>
-            {profileMenu && <div className="hero-dropdown profile-dropdown"><button type="button" onClick={() => setProfileMenu(false)}>Default profile</button><button type="button" onClick={() => { setProfileMenu(false); navigate('/profiles'); }}>Manage profiles</button></div>}
-          </div>
-          <div className="quick-setting loader-setting">
-            <div className="quick-setting-icon loader-puzzle">âœ¦</div>
-            <div><small>{selectedLoader}</small><strong>Mod Loader</strong></div>
-            <ChevronDown className="quick-chevron h-4 w-4" />
-          </div>
-          <button type="button" className="add-profile" onClick={() => navigate('/profiles')}><span>+</span> Add Profile</button>
         </div>
 
         <section className="news-section">
@@ -401,7 +450,7 @@ function HomePage() {
         <section className="rail-panel discord-panel">
           <DiscordPresenceCard />
         </section>
-        <button type="button" className="rail-panel store-panel" onClick={() => navigate('/store')}><ShoppingCart className="h-6 w-6" /><span><strong>Store</strong><small>Cosmetics, Ranks &amp; More</small></span><ChevronRight className="ml-auto h-4 w-4" /></button>
+        <button type="button" className="rail-panel store-panel" onClick={() => navigate('/store')}><ShoppingCart className="h-6 w-6" /><span><strong>Store</strong><small>Bacoins &amp; Cosmetics</small></span><ChevronRight className="ml-auto h-4 w-4" /></button>
         <section className="rail-panel servers-panel">
           <div className="rail-heading"><h2>Partner Servers</h2></div>
           {serversState.loading ? (
@@ -542,8 +591,135 @@ function HomePage() {
   );
 }
 
-function PlaceholderPage({ title, description }: { title: string; description: string }) {
-  return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6"><GlassCard className="placeholder-panel"><div className="placeholder-logo"><LogoMark /></div><PageHeader title={title} subtitle={description} /><p className="placeholder-note">This area is not connected to an external service yet.</p></GlassCard></motion.div>;
+function StorePage() {
+  const [user, setUser] = useState<BacoinsUser | null>(null);
+  const [cosmetics, setCosmetics] = useState<Cosmetic[]>([]);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [signedIn, setSignedIn] = useState(Boolean(getBacoinsToken()));
+
+  useEffect(() => {
+    void fetchCosmetics().then(setCosmetics).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not load the cosmetic shop.'));
+    if (getBacoinsToken()) void fetchBacoinsMe().then(setUser).catch((cause: unknown) => {
+      clearBacoinsToken(); setSignedIn(false); setUser(null);
+      setError(cause instanceof Error ? cause.message : 'Please sign in again.');
+    });
+  }, []);
+
+  const submitAuth = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy('auth'); setError(''); setNotice('');
+    try {
+      await authenticateBacoins(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, username, password);
+      const account = await fetchBacoinsMe(); setUser(account); setSignedIn(true); setPassword('');
+      setNotice(`Welcome, ${account.username}. Your Bacoins balance is ready.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not sign in.'); }
+    finally { setBusy(''); }
+  };
+
+  const redeem = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy('redeem'); setError(''); setNotice('');
+    try {
+      const result = await redeemBacoinsCode(code); setUser(result.user); setCode(''); setNotice(`${result.credited} Bacoins added to your balance.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not redeem code.'); }
+    finally { setBusy(''); }
+  };
+
+  const buy = async (item: Cosmetic) => {
+    setBusy(item.id); setError(''); setNotice('');
+    try {
+      const result = await purchaseCosmetic(item.id); setUser(result.user); setNotice(`${item.name} added to your cosmetics.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not purchase cosmetic.'); }
+    finally { setBusy(''); }
+  };
+
+  const equip = async (id: string | null) => {
+    setBusy('equip'); setError(''); setNotice('');
+    try { const result = await equipCosmetic(id); setUser(result.user); setNotice(id ? 'Cosmetic equipped on your Bayon profile.' : 'Profile cosmetic removed.'); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update your profile cosmetic.'); }
+    finally { setBusy(''); }
+  };
+
+  const signOut = () => { clearBacoinsToken(); setUser(null); setSignedIn(false); setNotice('Signed out of your Bayon account.'); setError(''); };
+
+  return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
+    <div className="mx-auto max-w-6xl">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><PageHeader title="Bacoins Store" subtitle="Redeem Bacoins and customize your Bayon profile." />
+        {user && <div className="flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3"><Coins className="h-5 w-5 text-amber-200" /><div><small className="block text-[10px] uppercase tracking-widest text-white/45">Your balance</small><strong className="text-lg">{user.bacoins.toLocaleString()} Bacoins</strong></div></div>}
+      </div>
+
+      {error && <div role="alert" className="mb-4 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
+      {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
+
+      {!signedIn ? <GlassCard className="mb-5 p-5">
+        <div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-white/5"><UserRound className="h-5 w-5 text-sky-100" /></div><div><h2 className="font-semibold">Sign in to your Bayon account</h2><p className="mt-1 text-xs text-white/45">Your Bacoins and purchased cosmetics are saved to this account. Minecraft offline profiles do not sign in here.</p></div></div>
+        <form onSubmit={(event) => void submitAuth(event)} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"><input required minLength={3} maxLength={16} autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Bayon username" className="rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm outline-none focus:border-sky-300/40" /><input required type="password" minLength={6} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (6+ characters)" className="rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm outline-none focus:border-sky-300/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-sky-100 disabled:opacity-50">{busy === 'auth' ? 'Please wait…' : authMode === 'login' ? 'Sign in' : 'Create account'}</button></form>
+        <button type="button" className="mt-3 text-xs text-sky-200/80 hover:text-sky-100" onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setError(''); }}>{authMode === 'login' ? 'New here? Create a Bayon account' : 'Already have an account? Sign in'}</button>
+      </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
+        <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
+        <GlassCard className="flex items-center justify-between gap-5 p-5"><div><strong className="block">Signed in as {user?.username}</strong><span className="mt-1 block text-xs text-white/45">Account balance and owned items sync with the server.</span></div><button type="button" onClick={signOut} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:bg-white/5"><LogOut className="h-4 w-4" />Sign out</button></GlassCard>
+      </div>}
+
+      <div className="mb-4 flex items-center gap-2"><Sparkles className="h-4 w-4 text-sky-200" /><h2 className="text-base font-semibold">Cosmetics</h2><span className="text-xs text-white/40">{cosmetics.length} items</span></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{cosmetics.map((item) => {
+        const owned = Boolean(user?.ownedCosmetics.includes(item.id));
+        const equipped = user?.equippedCosmetic === item.id;
+        return <GlassCard key={item.id} className="overflow-hidden p-0"><div className="relative grid h-36 place-items-center border-b border-white/5 bg-gradient-to-br from-white/[0.04] to-transparent"><div className="grid h-20 w-20 place-items-center rounded-2xl border border-white/10 bg-black/20 shadow-xl" style={{ color: item.accent }}><Gem className="h-10 w-10" /></div><span className="absolute right-3 top-3 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[10px] text-white/55">{item.category}</span></div><div className="p-4"><h3 className="font-semibold">{item.name}</h3><p className="mt-1 min-h-10 text-xs leading-5 text-white/45">{item.description}</p><div className="mt-4 flex items-center justify-between gap-3"><strong className="flex items-center gap-1.5 text-sm"><Coins className="h-4 w-4 text-amber-200" />{item.price.toLocaleString()}</strong>{owned ? <button type="button" disabled={Boolean(busy)} onClick={() => void equip(equipped ? null : item.id)} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition disabled:opacity-50 ${equipped ? 'border-emerald-300/20 bg-emerald-300/5 text-emerald-100' : 'border-white/10 text-white/75 hover:bg-white/5'}`}>{equipped ? <><Check className="h-3.5 w-3.5" />Equipped</> : 'Equip'}</button> : <button type="button" disabled={!user || Boolean(busy)} onClick={() => void buy(item)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40">{busy === item.id ? 'Buying…' : user ? 'Buy cosmetic' : 'Sign in to buy'}</button>}</div></div></GlassCard>;
+      })}</div>
+      <div className="mt-5 rounded-xl border border-white/8 bg-white/[0.02] p-4 text-xs text-white/45"><strong className="text-white/65">Payments are coming later.</strong> Bacoins can currently be added only with a redeem code. No payment is collected in this Store.</div>
+    </div>
+  </motion.div>;
+}
+
+function ProfilesPage() {
+  const location = useLocation();
+  const availableVersions = useMinecraftVersions();
+  const profiles = useProfileStore((state) => state.profiles);
+  const activeProfileId = useProfileStore((state) => state.activeProfileId);
+  const createProfileInStore = useProfileStore((state) => state.createProfile);
+  const updateProfile = useProfileStore((state) => state.updateProfile);
+  const removeProfile = useProfileStore((state) => state.removeProfile);
+  const selectProfile = useProfileStore((state) => state.selectProfile);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [version, setVersion] = useState('26.3');
+
+  useEffect(() => { if (new URLSearchParams(location.search).get('create') === '1') setCreating(true); }, [location.search]);
+
+  const createProfile = (event: React.FormEvent) => {
+    event.preventDefault();
+    const profileName = name.trim() || `Minecraft ${version}`;
+    const profile = createProfileInStore(profileName, version);
+    selectProfile(profile.id);
+    setName('');
+    setCreating(false);
+  };
+
+  return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
+    <div className="mx-auto max-w-5xl">
+      <div className="mb-6 flex items-center justify-between gap-4"><PageHeader title="Profiles" subtitle="Create and configure Minecraft versions and launch modes." /><PrimaryButton onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Create version</PrimaryButton></div>
+      {profiles.length === 0 ? <GlassCard className="p-8 text-center text-sm text-white/50">No versions yet. Create a version to get started.</GlassCard> : <div className="grid gap-4 md:grid-cols-2">
+        {profiles.map((profile) => <VersionProfileCard key={profile.id} profile={profile} availableVersions={availableVersions} active={profile.id === activeProfileId} onSelect={() => selectProfile(profile.id)} onUpdate={(updates) => updateProfile(profile.id, updates)} onRemove={() => removeProfile(profile.id)} />)}
+      </div>}
+      {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreating(false); }}><form onSubmit={createProfile} className="w-full max-w-md rounded-xl border border-white/10 bg-[#0e141b] p-5 shadow-2xl"><h3 className="text-lg font-semibold">Create version</h3><p className="mb-5 mt-1 text-xs text-white/45">Create a Fabric profile for Minecraft {version}.</p><div className="grid gap-4"><label className="grid gap-2 text-xs text-white/55">Profile name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={`Minecraft ${version}`} className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white outline-none" /></label><label className="grid gap-2 text-xs text-white/55">Minecraft version<MinecraftVersionDropdown value={version} onChange={setVersion} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Loader<div className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white">Fabric</div></label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setCreating(false)} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-white/65">Cancel</button><button type="submit" className="rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black">Create version</button></div></form></div>}
+    </div>
+  </motion.div>;
+}
+
+function VersionProfileCard({ profile, availableVersions, active, onSelect, onUpdate, onRemove }: { profile: VersionProfile; availableVersions: string[]; active: boolean; onSelect: () => void; onUpdate: (updates: Partial<Pick<VersionProfile, 'name' | 'version'>>) => void; onRemove: () => void }) {
+  const [mods, setMods] = useState<InstalledMod[]>([]);
+  const [addModOpen, setAddModOpen] = useState(false);
+  useEffect(() => { void window.electronAPI?.getInstalledMods(profile.id).then(setMods).catch(() => {}); }, [profile.id]);
+  return <GlassCard className="p-5">
+    <div className="mb-4 flex items-start justify-between gap-3"><div><input aria-label="Profile name" value={profile.name} onChange={(event) => onUpdate({ name: event.target.value })} className="w-full bg-transparent text-base font-semibold outline-none" /><p className="mt-1 text-xs text-white/45">Minecraft {profile.version} · Fabric</p></div><span className="rounded-md border border-white/10 px-2 py-1 text-[10px] text-white/60">{active ? 'ACTIVE' : 'PROFILE'}</span></div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-2 text-xs text-white/55">Version<MinecraftVersionDropdown value={profile.version} onChange={(value) => onUpdate({ version: value })} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Loader<div className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2 text-sm text-white">Fabric</div></label></div>
+    <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={onSelect} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 hover:bg-white/10">Use on Home</button><button type="button" onClick={() => setAddModOpen(true)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"><Plus className="mr-1 inline h-3.5 w-3.5" />Add mod ({mods.length})</button><button type="button" onClick={onRemove} className="ml-auto rounded-lg border border-red-400/20 px-3 py-2 text-xs text-red-200/75 hover:bg-red-500/10">Remove</button></div>
+    {addModOpen && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} />}
+  </GlassCard>;
 }
 
 function DiscordPresenceCard() {
@@ -658,7 +834,7 @@ function AccountsPage() {
           ) : (
             <div className="account-list">{accounts.map((account) => (
               <div className="account-row" key={account.id}>
-                <div className="avatar-large">{account.username.slice(0, 1).toUpperCase()}</div>
+                <MinecraftAvatar username={account.username} skin={account.skin} className="avatar-large" />
                 <div className="account-row-copy"><strong>{account.username}</strong><small>Offline profile Â· created {new Date(account.createdAt).toLocaleDateString()}</small></div>
                 {activeAccountId === account.id ? <span className="account-active-badge">Active</span> : <button type="button" className="account-select-button" onClick={() => selectAccount(account.id)}>Use account</button>}
                 <button type="button" className="account-remove-button" onClick={() => setConfirmRemove(account.id)} aria-label={`Remove ${account.username}`}>Remove</button>
@@ -694,11 +870,14 @@ function AccountsPage() {
 /* Existing launcher pages remain available from the sidebar and keep their local demo interactions. */
 
 function PlayPage() {
+  const availableVersions = useMinecraftVersions();
   const [memory, setMemory] = useState(8);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Ready to prepare launch options.');
   const [launching, setLaunching] = useState(false);
   const settings = useSettingsStore();
+  const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
+  const updateProfile = useProfileStore((state) => state.updateProfile);
   const activeAccount = useAccountStore((state) => state.accounts.find((a) => a.id === state.activeAccountId));
 
   const handleLaunchDemo = async () => {
@@ -717,10 +896,14 @@ function PlayPage() {
 
     try {
       await window.electronAPI?.launchMinecraft({
-        version: settings.defaultVersion ?? '1.21.1',
+        version: activeProfile?.version ?? '26.3',
         loader: 'Fabric',
+        profileName: activeProfile?.name,
+        profileId: activeProfile?.id,
         username: activeAccount?.username ?? 'Player',
         memory: memory,
+        javaPath: settings.javaPath,
+        customArgs: settings.customArgs,
       });
     } catch (err) {
       setProgress(0);
@@ -744,7 +927,7 @@ function PlayPage() {
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <div>
               <Label>Version</Label>
-              <Select value={settings.defaultVersion} onChange={settings.setDefaultVersion} options={versions} />
+              <MinecraftVersionDropdown value={activeProfile?.version ?? '26.3'} onChange={(value) => { if (activeProfile) updateProfile(activeProfile.id, { version: value }); }} availableVersions={availableVersions} />
             </div>
             <div>
               <Label>Build</Label>
@@ -764,7 +947,7 @@ function PlayPage() {
               <Label>Java Executable</Label>
               <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#121212] px-3 py-2">
                 <HardDrive className="h-4 w-4 text-white/50" />
-                <span className="truncate text-sm text-white/80">{settings.javaPath}</span>
+                <span className="truncate text-sm text-white/80">{settings.javaPath || 'Auto-detected Java'}</span>
               </div>
             </div>
           </div>
@@ -805,7 +988,7 @@ function PlayPage() {
           <div className="rounded-2xl border border-white/10 bg-[#111111] p-4">
             <div className="mb-2 flex items-center justify-between text-sm text-white/70">
               <span>Selected version</span>
-              <span>{settings.defaultVersion}</span>
+              <span>{activeProfile?.version ?? '26.3'}</span>
             </div>
             <div className="mb-2 flex items-center justify-between text-sm text-white/70">
               <span>Java</span>
@@ -827,25 +1010,30 @@ function PlayPage() {
 }
 
 function ModsPage() {
+  const activeProfileId = useProfileStore((state) => state.activeProfileId);
+  const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
   const [mods, setMods] = useState<InstalledMod[]>([]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
+  const [projectType, setProjectType] = useState<ModrinthProjectType>('mod');
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [addModOpen, setAddModOpen] = useState(false);
 
   useEffect(() => {
     if (window.electronAPI?.getInstalledMods) {
-      window.electronAPI.getInstalledMods().then(setMods).catch(() => {});
+      window.electronAPI.getInstalledMods(activeProfileId ?? undefined).then(setMods).catch(() => {});
     }
-  }, []);
+  }, [activeProfileId]);
 
-  const categories = useMemo(() => ['All', ...new Set(mods.map((mod) => mod.category || 'Utility'))], [mods]);
-  const filteredMods = mods.filter((mod) => (category === 'All' || mod.category === category) && `${mod.name} ${mod.description}`.toLowerCase().includes(search.toLowerCase()));
+  const contentLabel = modContentTabs.find((tab) => tab.id === projectType)?.label ?? 'Mods';
+  const contentItems = mods.filter((mod) => (mod.projectType || 'mod') === projectType);
+  const categories = useMemo(() => ['All', ...new Set(contentItems.map((mod) => mod.category || 'Utility'))], [contentItems]);
+  const filteredMods = contentItems.filter((mod) => (category === 'All' || mod.category === category) && `${mod.name} ${mod.description}`.toLowerCase().includes(search.toLowerCase()));
 
   const toggleMod = async (id: string, currentEnabled: boolean) => {
     if (window.electronAPI?.toggleMod) {
       try {
-        const updated = await window.electronAPI.toggleMod(id, !currentEnabled);
+        const updated = await window.electronAPI.toggleMod(id, !currentEnabled, activeProfileId ?? undefined);
         setMods(updated);
       } catch {
         setMods((current) => current.map((mod) => (mod.id === id ? { ...mod, enabled: !currentEnabled } : mod)));
@@ -859,7 +1047,7 @@ function ModsPage() {
     if (removeId === null) return;
     if (window.electronAPI?.uninstallMod) {
       try {
-        const updated = await window.electronAPI.uninstallMod(removeId);
+        const updated = await window.electronAPI.uninstallMod(removeId, activeProfileId ?? undefined);
         setMods(updated);
       } catch {
         setMods((current) => current.filter((mod) => mod.id !== removeId));
@@ -871,20 +1059,24 @@ function ModsPage() {
   };
 
   const openFolder = () => {
-    void window.electronAPI?.openModsFolder();
+    void window.electronAPI?.openModsFolder(activeProfileId ?? undefined, projectType);
   };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="page-scroll p-5">
       <div className="space-y-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <PageHeader title="Mods" subtitle="Manage performance and gameplay tweaks" />
+          <PageHeader title="Content Library" subtitle={activeProfile ? `${contentLabel} for ${activeProfile.name} · Minecraft ${activeProfile.version}` : 'Select a profile to manage its content'} />
           <div className="flex items-center gap-3">
             <button type="button" onClick={openFolder} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-sm text-white/80 transition hover:bg-white/8">
-              <FolderOpen className="h-4 w-4" /> Open mods folder
+              <FolderOpen className="h-4 w-4" /> Open folder
             </button>
-            <PrimaryButton onClick={() => setAddModOpen(true)}> <Plus className="h-4 w-4" /> Add mod </PrimaryButton>
+            <PrimaryButton onClick={() => activeProfile && setAddModOpen(true)}><Plus className="h-4 w-4" /> Browse {contentLabel}</PrimaryButton>
           </div>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto rounded-xl border border-white/8 bg-[#0d1218] p-1.5" role="tablist" aria-label="Minecraft content type">
+          {modContentTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={projectType === tab.id} onClick={() => { setProjectType(tab.id); setCategory('All'); setSearch(''); }} className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition ${projectType === tab.id ? 'border border-white/10 bg-[#202a34] text-white shadow' : 'text-white/50 hover:bg-white/5 hover:text-white/85'}`}>{tab.label}</button>)}
         </div>
 
         <GlassCard className="p-4">
@@ -899,7 +1091,7 @@ function ModsPage() {
         </GlassCard>
 
         {filteredMods.length === 0 ? (
-          <EmptyState title="No mods installed" text="Click 'Add mod' to search and install mods directly from Modrinth." />
+          <EmptyState title={`No ${contentLabel.toLowerCase()} installed`} text={`Browse ${contentLabel.toLowerCase()} on Modrinth to add them to this profile.`} />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredMods.map((mod) => (
@@ -915,16 +1107,18 @@ function ModsPage() {
                     )}
                     <div>
                       <div className="text-base font-semibold text-white">{mod.name}</div>
-                      <div className="text-xs uppercase tracking-[0.12em] text-white/40">{mod.category || 'Mod'}</div>
+                      <div className="text-xs uppercase tracking-[0.12em] text-white/40">{projectType === 'modpack' ? 'Modpack' : mod.category || contentLabel.replace(/s$/, '')}</div>
                     </div>
                   </div>
-                  <Toggle checked={mod.enabled} onChange={() => void toggleMod(mod.id, mod.enabled)} />
+                  {projectType === 'mod'
+                    ? <Toggle checked={mod.enabled} onChange={() => void toggleMod(mod.id, mod.enabled)} />
+                    : <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-medium text-emerald-300">Downloaded</span>}
                 </div>
                 <div className="p-4">
                   <p className="line-clamp-2 text-xs text-white/60">{mod.description || 'Installed via Modrinth'}</p>
                   <div className="mt-4 flex items-center justify-between text-xs uppercase tracking-[0.12em] text-white/45">
                     <span>{mod.version}</span>
-                    <span>{mod.loader}</span>
+                    <span>{projectType === 'datapack' && mod.worldName ? `World: ${mod.worldName}` : projectType === 'modpack' ? 'Modrinth pack file' : mod.loader}</span>
                   </div>
                   <div className="mt-4 flex items-center justify-between border-t border-white/6 pt-3">
                     {mod.projectUrl ? (
@@ -944,9 +1138,9 @@ function ModsPage() {
       </div>
 
       {removeId !== null && (
-        <Modal title="Remove mod" onClose={() => setRemoveId(null)}>
+        <Modal title={`Remove ${contentLabel.toLowerCase().replace(/s$/, '')}`} onClose={() => setRemoveId(null)}>
           <div className="space-y-4 text-sm text-white/65">
-            <p>Are you sure you want to remove this mod from your current profile?</p>
+            <p>Remove this {contentLabel.toLowerCase().replace(/s$/, '')} from {activeProfile?.name ?? 'this profile'}?</p>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setRemoveId(null)} className="rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-white/80">Cancel</button>
               <button type="button" onClick={removeMod} className="rounded-xl bg-red-500/15 px-3 py-2 text-red-200">Remove</button>
@@ -954,17 +1148,21 @@ function ModsPage() {
           </div>
         </Modal>
       )}
-      {addModOpen && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} />}
+      {addModOpen && activeProfile && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} profileId={activeProfile.id} gameVersion={activeProfile.version} loader={activeProfile.loader} projectType={projectType} />}
     </motion.div>
   );
 }
 
-function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => void; installedMods: InstalledMod[]; onModsChange: (mods: InstalledMod[]) => void }) {
+function AddModModal({ onClose, installedMods, onModsChange, profileId = 'default', gameVersion: initialGameVersion = '26.3', loader: initialLoader = 'Fabric', projectType: initialProjectType = 'mod' }: { onClose: () => void; installedMods: InstalledMod[]; onModsChange: (mods: InstalledMod[]) => void; profileId?: string; gameVersion?: string; loader?: string; projectType?: ModrinthProjectType }) {
+  const availableVersions = useMinecraftVersions();
   const [source, setSource] = useState<ModCatalogSource>('modrinth');
+  const [projectType, setProjectType] = useState<ModrinthProjectType>(initialProjectType);
   const [query, setQuery] = useState('');
-  const [gameVersion, setGameVersion] = useState('1.21.1');
-  const [loader, setLoader] = useState('Fabric');
+  const [gameVersion, setGameVersion] = useState(initialGameVersion);
+  const [loader, setLoader] = useState(initialLoader);
   const [results, setResults] = useState<ModCatalogResult[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
@@ -972,6 +1170,14 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
   const [keyStatusError, setKeyStatusError] = useState('');
   const [openError, setOpenError] = useState('');
   const [installingIds, setInstallingIds] = useState<Record<string, boolean>>({});
+  const [worlds, setWorlds] = useState<string[]>([]);
+  const [worldName, setWorldName] = useState('');
+  const contentLabel = modContentTabs.find((tab) => tab.id === projectType)?.label ?? 'Mods';
+
+  useEffect(() => {
+    if (projectType !== 'datapack' || !window.electronAPI?.getMinecraftWorlds) return;
+    window.electronAPI.getMinecraftWorlds(profileId).then(setWorlds).catch(() => setWorlds([]));
+  }, [profileId, projectType]);
 
   useEffect(() => {
     if (!window.electronAPI) {
@@ -983,15 +1189,19 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
       .catch((cause: unknown) => setKeyStatusError(cause instanceof Error ? cause.message : 'Could not check CurseForge API key status.'));
   }, []);
 
-  const performSearch = async (targetQuery: string) => {
+  const pageSize = source === 'curseforge' ? 20 : 25;
+
+  const performSearch = async (targetQuery: string, targetPage: number) => {
     setLoading(true);
     setError('');
     setSearched(true);
     try {
-      const matches = await searchModCatalog({ source, query: targetQuery.trim(), gameVersion, loader });
+      const matches = await searchModCatalog({ source, query: targetQuery.trim(), gameVersion, loader, projectType, offset: targetPage * pageSize });
       setResults(matches);
+      setHasNextPage(matches.length === pageSize);
     } catch (cause) {
       setResults([]);
+      setHasNextPage(false);
       setError(cause instanceof Error ? cause.message : 'Could not search this mod catalog.');
     } finally {
       setLoading(false);
@@ -1000,12 +1210,13 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
 
   const search = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void performSearch(query);
+    if (page === 0) void performSearch(query, 0);
+    else setPage(0);
   };
 
   useEffect(() => {
-    void performSearch(query);
-  }, [source, gameVersion, loader]);
+    void performSearch(query, page);
+  }, [source, gameVersion, loader, projectType, page]);
 
   const installMod = async (result: ModCatalogResult) => {
     if (!window.electronAPI?.installModrinthMod) return;
@@ -1016,6 +1227,9 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
         projectId: result.id,
         gameVersion,
         loader,
+        profileId,
+        projectType,
+        worldName: projectType === 'datapack' ? worldName || undefined : undefined,
         name: result.name,
         summary: result.summary,
         iconUrl: result.iconUrl,
@@ -1041,31 +1255,35 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
   };
 
   return (
-    <Modal title="Browse mod catalogs" onClose={onClose} className="mod-catalog-modal">
+    <Modal title={`Browse ${contentLabel}`} onClose={onClose} className="mod-catalog-modal">
       <div className="mod-catalog">
-        <p className="mod-catalog-note">Search and install real Modrinth mods directly into Bayon Client.</p>
+        <p className="mod-catalog-note">Search {contentLabel.toLowerCase()} on Modrinth and add them to this profile.</p>
+        <div className="mod-content-tabs" role="tablist" aria-label="Modrinth content type">
+          {modContentTabs.map((tab) => <button type="button" role="tab" aria-selected={projectType === tab.id} key={tab.id} className={projectType === tab.id ? 'mod-content-tab-active' : ''} onClick={() => { setPage(0); setProjectType(tab.id); if (tab.id !== 'mod') setSource('modrinth'); setResults([]); setHasNextPage(false); setError(''); setSearched(false); }}>{tab.label}</button>)}
+        </div>
         <div className="mod-source-tabs" role="tablist" aria-label="Mod catalog">
-          <button type="button" role="tab" aria-selected={source === 'modrinth'} className={source === 'modrinth' ? 'mod-source-active' : ''} onClick={() => { setSource('modrinth'); setResults([]); setError(''); setSearched(false); }}>Modrinth</button>
-          <button type="button" role="tab" aria-selected={source === 'curseforge'} className={source === 'curseforge' ? 'mod-source-active' : ''} onClick={() => { setSource('curseforge'); setResults([]); setError(''); setSearched(false); }}>CurseForge {hasCurseForgeKey ? <span className="source-ready">API ready</span> : <span className="source-key-needed">API key needed</span>}</button>
+          <button type="button" role="tab" aria-selected={source === 'modrinth'} className={source === 'modrinth' ? 'mod-source-active' : ''} onClick={() => { setPage(0); setSource('modrinth'); setResults([]); setHasNextPage(false); setError(''); setSearched(false); }}>Modrinth</button>
+          {projectType === 'mod' && <button type="button" role="tab" aria-selected={source === 'curseforge'} className={source === 'curseforge' ? 'mod-source-active' : ''} onClick={() => { setPage(0); setSource('curseforge'); setResults([]); setHasNextPage(false); setError(''); setSearched(false); }}>CurseForge {hasCurseForgeKey ? <span className="source-ready">API ready</span> : <span className="source-key-needed">API key needed</span>}</button>}
         </div>
         {keyStatusError && <p className="mod-catalog-subtle" role="status">{keyStatusError}</p>}
         <form className="mod-search-form" onSubmit={search}>
           <label className="mod-search-field">
             <Search className="h-4 w-4" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search mods (e.g. Sodium, Iris, Lithium)" autoFocus />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${contentLabel.toLowerCase()}`} autoFocus />
           </label>
           <div className="mod-search-filters">
-            <label><span>Version</span><select value={gameVersion} onChange={(event) => setGameVersion(event.target.value)}>{versions.map((version) => <option key={version}>{version}</option>)}</select></label>
-            <label><span>Loader</span><select value={loader} onChange={(event) => setLoader(event.target.value)}>{['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label><span>Version</span><MinecraftVersionDropdown value={gameVersion} onChange={(value) => { setPage(0); setGameVersion(value); }} availableVersions={availableVersions} /></label>
+            {(projectType === 'mod' || projectType === 'modpack') && <label><span>Loader</span><select value={loader} onChange={(event) => { setPage(0); setLoader(event.target.value); }}>{['Fabric', 'Forge', 'NeoForge', 'Quilt'].map((value) => <option key={value}>{value}</option>)}</select></label>}
             <button type="submit" disabled={loading}>{loading ? 'Searchingâ€¦' : 'Search'}</button>
           </div>
         </form>
+        {projectType === 'datapack' && <label className="mod-world-select"><span>Install to world (optional)</span><select value={worldName} onChange={(event) => setWorldName(event.target.value)}><option value="">Save to Data Packs folder for later</option>{worlds.map((world) => <option key={world}>{world}</option>)}</select><small>If no world is selected, move the downloaded pack into a world's datapacks folder to use it.</small></label>}
         {error && <p className="mod-catalog-error" role="alert">{error}</p>}
         {openError && <p className="mod-catalog-error" role="alert">{openError}</p>}
         <div className="mod-catalog-results" aria-live="polite">
           {loading && <div className="mod-catalog-empty">Searching {source === 'modrinth' ? 'Modrinth' : 'CurseForge'}â€¦</div>}
           {!loading && results.map((result) => {
-            const isInstalled = installedMods.some((m) => m.id === result.id || m.name.toLowerCase() === result.name.toLowerCase());
+            const isInstalled = installedMods.some((m) => m.id === result.id && (m.projectType || 'mod') === projectType);
             return (
               <article className="mod-result" key={`${result.source}-${result.id}`}>
                 {result.iconUrl ? <img src={result.iconUrl} alt="" /> : <div className="mod-result-icon"><Layers3 className="h-5 w-5" /></div>}
@@ -1087,10 +1305,10 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
                           ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300 cursor-default'
                           : installingIds[result.id]
                           ? 'border border-white/20 bg-white/10 text-white/60 cursor-wait'
-                          : 'border border-white/40 bg-white text-black hover:bg-white/90 active:scale-95',
+                          : 'border border-white/20 bg-[#202a34] text-white hover:bg-[#2b3948] active:scale-95',
                       ].join(' ')}
                     >
-                      {isInstalled ? 'Installed ✓' : installingIds[result.id] ? 'Installing…' : 'Install Mod'}
+                      {isInstalled ? 'Added ?' : installingIds[result.id] ? 'Downloading?' : projectType === 'modpack' ? 'Download pack' : `Add ${contentLabel.replace(/s$/, '')}`}
                     </button>
                   )}
                   <button type="button" className="mod-project-button" onClick={() => openProject(result)}>Open project <Globe className="h-3.5 w-3.5" /></button>
@@ -1098,8 +1316,13 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
               </article>
             );
           })}
-          {!loading && !error && searched && results.length === 0 && <div className="mod-catalog-empty">No matching projects for {gameVersion} {loader}.</div>}
-          {!loading && !searched && <div className="mod-catalog-empty">Choose a catalog and search for a mod.</div>}
+          {!loading && !error && searched && results.length === 0 && <div className="mod-catalog-empty">No matching {contentLabel.toLowerCase()} for Minecraft {gameVersion}{projectType === 'mod' || projectType === 'modpack' ? ` ? ${loader}` : ''}.</div>}
+          {!loading && !searched && <div className="mod-catalog-empty">Search Modrinth for {contentLabel.toLowerCase()}.</div>}
+          {!loading && searched && !error && (page > 0 || hasNextPage) && <nav className="mod-catalog-pagination" aria-label="Catalog pages">
+            <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>Previous</button>
+            <span>Page {page + 1}</span>
+            <button type="button" onClick={() => setPage((current) => current + 1)} disabled={!hasNextPage}>Next</button>
+          </nav>}
         </div>
       </div>
     </Modal>
@@ -1107,18 +1330,21 @@ function AddModModal({ onClose, installedMods, onModsChange }: { onClose: () => 
 }
 
 function SkinsPage() {
-  const [selected, setSelected] = useState(1);
   const [rotation, setRotation] = useState(22);
   const [armModel, setArmModel] = useState('Classic');
-  const [uploadedSkin, setUploadedSkin] = useState<SkinItem | null>(null);
   const [uploadError, setUploadError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
-  const skins = uploadedSkin ? [uploadedSkin, ...skinGallery] : skinGallery;
-  const activeSkin = skins.find((skin) => skin.id === selected) ?? skinGallery[0];
+  const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
+  const updateAccountSkin = useAccountStore((state) => state.updateAccountSkin);
+  const activeSkin = activeAccount?.skin;
 
   const uploadSkin = (file?: File) => {
     setUploadError('');
     if (!file) return;
+    if (!activeAccount) {
+      setUploadError('Create or select an offline account before assigning a skin.');
+      return;
+    }
     if (file.type !== 'image/png' || file.size > 5 * 1024 * 1024) {
       setUploadError('Choose a PNG skin image smaller than 5 MB.');
       return;
@@ -1133,24 +1359,21 @@ function SkinsPage() {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== 'string') {
-          setUploadError('The selected skin could not be read.');
-          return;
-        }
-        const skin: SkinItem = {
-          id: 99,
-          name: file.name.replace(/\.png$/i, ''),
-          type: 'Custom',
-          accent: 'from-zinc-200 to-zinc-600',
-          imageUrl: reader.result,
-        };
-        setUploadedSkin(skin);
-        setSelected(skin.id);
-      };
-      reader.onerror = () => setUploadError('The selected skin could not be read.');
-      reader.readAsDataURL(file);
+      const normalized = document.createElement('canvas');
+      normalized.width = 64;
+      normalized.height = image.height;
+      const context = normalized.getContext('2d');
+      if (!context) {
+        setUploadError('The selected skin could not be processed.');
+        return;
+      }
+      context.imageSmoothingEnabled = false;
+      context.drawImage(image, 0, 0, 64, image.height);
+      updateAccountSkin(activeAccount.id, {
+        name: file.name.replace(/\.png$/i, '') || activeAccount.username,
+        imageUrl: normalized.toDataURL('image/png'),
+        legacy: image.height === 32,
+      });
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
@@ -1163,10 +1386,10 @@ function SkinsPage() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="page-scroll p-5">
       <div className="grid gap-5 xl:grid-cols-[1.4fr_0.7fr]">
         <GlassCard className="p-5">
-          <PageHeader title="Skins" subtitle="Browse and preview your character" />
+          <PageHeader title="Skins" subtitle={activeAccount ? `Skin saved to ${activeAccount.username}'s offline profile` : 'Select an offline account to assign a skin'} />
           <div className="mt-5 rounded-[24px] border border-white/10 bg-[radial-gradient(circle_at_top,#0f0f0f,#090909)] p-6">
             <div className="flex items-center justify-between">
-              <div><div className="text-xs uppercase tracking-[0.18em] text-white/45">Skin preview</div><div className="mt-1 text-sm text-white/75">{activeSkin.name}</div></div>
+              <div><div className="text-xs uppercase tracking-[0.18em] text-white/45">Skin preview</div><div className="mt-1 text-sm text-white/75">{activeSkin?.name ?? 'Default'}</div></div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => setRotation((value) => value - 12)} className="rounded-lg border border-white/10 bg-white/3 px-2 py-1.5 text-white/75">-</button>
                 <button type="button" onClick={() => setRotation((value) => value + 12)} className="rounded-lg border border-white/10 bg-white/3 px-2 py-1.5 text-white/75">+</button>
@@ -1178,36 +1401,35 @@ function SkinsPage() {
             </div>
             <div className="skin-preview-stage">
               <Suspense fallback={<div className="skin-preview-loading">Loading 3D skin previewâ€¦</div>}>
-                <SkinModelPreview imageUrl={activeSkin.imageUrl} skinName={activeSkin.name} rotation={rotation} slimArms={armModel === 'Slim'} onRotationChange={setRotation} />
+                <SkinModelPreview imageUrl={activeSkin?.imageUrl} skinName={activeSkin?.name ?? 'Default'} rotation={rotation} slimArms={armModel === 'Slim'} onRotationChange={setRotation} />
               </Suspense>
             </div>
-            {activeSkin.imageUrl && <div className="uploaded-texture"><FileImage className="h-4 w-4" /><span>Uploaded texture</span><img src={activeSkin.imageUrl} alt={`${activeSkin.name} skin texture`} /></div>}
+            {activeSkin?.imageUrl && <div className="uploaded-texture"><FileImage className="h-4 w-4" /><span>Profile skin texture</span><img src={activeSkin.imageUrl} alt={`${activeSkin.name} skin texture`} /></div>}
           </div>
         </GlassCard>
 
         <GlassCard className="p-5">
           <div className="mb-4 flex items-center justify-between">
-            <div className="text-sm font-medium text-white/80">Skin Gallery</div>
-            <input ref={fileInput} type="file" accept="image/png,.png" hidden onChange={(event) => uploadSkin(event.target.files?.[0])} />
-            <button type="button" onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-xs uppercase tracking-[0.14em] text-white/70"><ImagePlus className="h-4 w-4" /> Upload skin</button>
+            <div className="text-sm font-medium text-white/80">Profile Skin</div>
+            <input ref={fileInput} type="file" accept="image/png,.png" hidden onChange={(event) => { uploadSkin(event.target.files?.[0]); event.currentTarget.value = ''; }} />
+            <button type="button" disabled={!activeAccount} onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-xs uppercase tracking-[0.14em] text-white/70 disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus className="h-4 w-4" /> Upload skin</button>
           </div>
           <div className="space-y-3">
-            {skins.map((skin) => (
-              <button key={skin.id} type="button" onClick={() => setSelected(skin.id)} className={['flex items-center justify-between rounded-xl border p-3 text-left transition', selected === skin.id ? 'border-white/20 bg-white/8' : 'border-white/10 bg-[#111111]'].join(' ')}>
-                <div className="flex items-center gap-3">
-                  {skin.imageUrl ? <img className="h-12 w-12 rounded-xl border border-white/10 object-contain [image-rendering:pixelated]" src={skin.imageUrl} alt="" /> : <div className={`h-12 w-12 rounded-xl border border-white/10 bg-gradient-to-br ${skin.accent}`} />}
-                  <div>
-                    <div className="font-medium text-white/86">{skin.name}</div>
-                    <div className="text-xs uppercase tracking-[0.1em] text-white/40">{skin.type}</div>
-                  </div>
-                </div>
-                {selected === skin.id && <span className="h-2.5 w-2.5 rounded-full bg-white" />}
-              </button>
-            ))}
+            <button type="button" disabled={!activeAccount} onClick={() => activeAccount && updateAccountSkin(activeAccount.id, null)} className={['flex w-full items-center justify-between rounded-xl border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-40', !activeSkin ? 'border-white/20 bg-white/8' : 'border-white/10 bg-[#111111]'].join(' ')}>
+              <div className="flex items-center gap-3"><MinecraftAvatar username={activeAccount?.username ?? 'Steve'} className="skin-gallery-avatar" /><div><div className="font-medium text-white/86">Default</div><div className="text-xs uppercase tracking-[0.1em] text-white/40">Minecraft default</div></div></div>
+              {!activeSkin && <span className="h-2.5 w-2.5 rounded-full bg-white" />}
+            </button>
+            {activeSkin && <div className="flex items-center justify-between rounded-xl border border-white/20 bg-white/8 p-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img className="skin-gallery-avatar rounded-xl border border-white/10 object-contain [image-rendering:pixelated]" src={activeSkin.imageUrl} alt="" />
+                <div className="min-w-0"><div className="truncate font-medium text-white/86">{activeSkin.name}</div><div className="text-xs uppercase tracking-[0.1em] text-white/40">Active profile skin</div></div>
+              </div>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-white" />
+            </div>}
           </div>
           {uploadError && <p role="alert" className="mt-3 text-xs text-red-300">{uploadError}</p>}
           <div className="mt-5 flex gap-3">
-            <SecondaryButton onClick={() => { setSelected(1); setUploadedSkin(null); setUploadError(''); if (fileInput.current) fileInput.current.value = ''; }}>
+            <SecondaryButton onClick={() => { if (activeAccount) updateAccountSkin(activeAccount.id, null); setUploadError(''); if (fileInput.current) fileInput.current.value = ''; }}>
               <RefreshIcon />
               Reset Skin
             </SecondaryButton>
@@ -1219,9 +1441,112 @@ function SkinsPage() {
 }
 
 function SettingsPage() {
+  const availableVersions = useMinecraftVersions();
   const settings = useSettingsStore();
-  const categories = ['General', 'Appearance', 'Game', 'Graphics', 'Memory', 'Account', 'Advanced'];
-  const [active, setActive] = useState('General');
+  const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
+  const updateProfile = useProfileStore((state) => state.updateProfile);
+  const [javaRuntimes, setJavaRuntimes] = useState<ManagedJavaRuntime[]>([]);
+  const [installingJava, setInstallingJava] = useState<Record<number, boolean>>({});
+  const [javaProgress, setJavaProgress] = useState<Record<number, JavaRuntimeProgress>>({});
+  const [javaError, setJavaError] = useState('');
+  const [argumentsDraft, setArgumentsDraft] = useState(settings.customArgs);
+  const [argumentsSaved, setArgumentsSaved] = useState(false);
+  const [directories, setDirectories] = useState<ClientDirectories | null>(null);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const api = window.electronAPI;
+    if (!api) return;
+    api.getClientDirectories().then((value) => { if (active) setDirectories(value); }).catch(() => {});
+    api.getManagedJavaRuntimes(settings.javaPath).then((runtimes) => { if (active) setJavaRuntimes(runtimes); }).catch((cause: unknown) => {
+      if (active) setJavaError(cause instanceof Error ? cause.message : 'Could not load managed Java runtimes.');
+    });
+    const unsubscribe = api.onJavaRuntimeProgress((progress) => {
+      setJavaProgress((current) => ({ ...current, [progress.major]: progress }));
+      if (progress.progress === 0 || progress.progress === 100) {
+        setInstallingJava((current) => ({ ...current, [progress.major]: false }));
+      }
+      if (progress.progress === 0) setJavaError(progress.status);
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [settings.javaPath]);
+
+  useEffect(() => { setArgumentsDraft(settings.customArgs); }, [settings.customArgs]);
+
+  const installJava = async (major: number) => {
+    setJavaError('');
+    setInstallingJava((current) => ({ ...current, [major]: true }));
+    setJavaProgress((current) => ({ ...current, [major]: { major, progress: 0, status: `Preparing Java ${major}…` } }));
+    try {
+      if (!window.electronAPI) throw new Error('Java runtime installation is available in the desktop app.');
+      setJavaRuntimes(await window.electronAPI.installManagedJavaRuntime(major));
+    } catch (cause) {
+      setJavaError(cause instanceof Error ? cause.message : `Could not install Java ${major}.`);
+    } finally {
+      setInstallingJava((current) => ({ ...current, [major]: false }));
+    }
+  };
+
+  const browseJavaPath = async () => {
+    try {
+      const selectedPath = await window.electronAPI?.selectJavaExecutable();
+      if (selectedPath) settings.setJavaPath(selectedPath);
+      setJavaError('');
+    } catch (cause) {
+      setJavaError(cause instanceof Error ? cause.message : 'Could not select the Java executable.');
+    }
+  };
+
+  const saveArguments = () => {
+    settings.setCustomArgs(argumentsDraft.trim());
+    setArgumentsSaved(true);
+    window.setTimeout(() => setArgumentsSaved(false), 1800);
+  };
+
+  const openDirectory = async (key: 'gameData' | 'install' | 'configuration' | 'java' | 'logs') => {
+    try { await window.electronAPI?.openClientDirectory(key); }
+    catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Could not open that directory.'); }
+  };
+
+  const chooseGameDirectory = async () => {
+    try {
+      const selected = await window.electronAPI?.chooseGameDataDirectory();
+      if (selected) { setDirectories(selected); setRecoveryMessage('Game data directory updated.'); }
+    } catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Could not change the game data directory.'); }
+  };
+
+  const runJavaTest = async () => {
+    setRecoveryBusy('java'); setRecoveryMessage('');
+    try {
+      if (!window.electronAPI) throw new Error('Java testing is available in the desktop app.');
+      const result = await window.electronAPI.testJavaRuntime({ javaPath: settings.javaPath, gameVersion: activeProfile?.version ?? '26.3' });
+      setRecoveryMessage(`Java is ready: ${result.output}`);
+    } catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Java could not start.'); }
+    finally { setRecoveryBusy(''); }
+  };
+
+  const createDiagnostic = async () => {
+    setRecoveryBusy('diagnostic'); setRecoveryMessage('');
+    try {
+      if (!window.electronAPI) throw new Error('Diagnostic reports are available in the desktop app.');
+      const result = await window.electronAPI.createDiagnosticReport();
+      setRecoveryMessage(`Redacted report saved locally: ${result.path}`);
+    } catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Could not create the diagnostic report.'); }
+    finally { setRecoveryBusy(''); }
+  };
+
+  const clearClientData = async () => {
+    setRecoveryBusy('clear'); setRecoveryMessage('');
+    try {
+      if (!window.electronAPI) throw new Error('Clear Data is available in the desktop app.');
+      await window.electronAPI.clearClientData();
+      window.localStorage.clear();
+      window.location.reload();
+    } catch (cause) { setRecoveryMessage(cause instanceof Error ? cause.message : 'Could not clear launcher data.'); setRecoveryBusy(''); setShowClearConfirm(false); }
+  };
 
   const handleToggleDiscordPresence = async (enabled: boolean) => {
     settings.setDiscordPresence(enabled);
@@ -1239,72 +1564,86 @@ function SettingsPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="page-scroll p-5">
-      <div className="grid gap-5 xl:grid-cols-[260px_1fr]">
-        <GlassCard className="p-3">
-          <div className="mb-3 px-2 text-xs uppercase tracking-[0.18em] text-white/45">Categories</div>
-          <div className="space-y-1">
-            {categories.map((category) => (
-              <button key={category} type="button" onClick={() => setActive(category)} className={['flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition', active === category ? 'bg-white/8 text-white' : 'text-white/55 hover:bg-white/4 hover:text-white/80'].join(' ')}>
-                {category}
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            ))}
-          </div>
-        </GlassCard>
-
+      <div className="settings-page">
         <GlassCard className="p-5">
-          <PageHeader title="Settings" subtitle="Tune the launcher and your default gameplay profile" />
+          <div className="settings-page-heading"><PageHeader title="Settings" subtitle="Tune the launcher and your gameplay profile" /><span className="settings-heading-icon"><Settings className="h-5 w-5" /></span></div>
           <div className="mt-5 grid gap-5 md:grid-cols-2">
-            <SettingRow label="Launch on startup"><Toggle checked={settings.launchOnStartup} onChange={settings.setLaunchOnStartup} /></SettingRow>
-            <SettingRow label="Minimize to tray"><Toggle checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} /></SettingRow>
-            <SettingRow label="Discord Rich Presence"><Toggle checked={settings.discordPresence} onChange={handleToggleDiscordPresence} /></SettingRow>
+            <SettingRow label="Launch on startup" icon={Radio}><Toggle checked={settings.launchOnStartup} onChange={settings.setLaunchOnStartup} /></SettingRow>
+            <SettingRow label="Minimize to tray" icon={Minus}><Toggle checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} /></SettingRow>
+            <SettingRow label="Discord Rich Presence" icon={Radio}><Toggle checked={settings.discordPresence} onChange={handleToggleDiscordPresence} /></SettingRow>
             <div>
-              <Label>Language</Label>
+              <SettingLabel icon={Globe}>Language</SettingLabel>
               <Select value={settings.language} onChange={settings.setLanguage} options={['English (US)', 'English (UK)', 'Deutsch', 'EspaÃ±ol']} />
             </div>
             <div>
-              <Label>Default version</Label>
-              <Select value={settings.defaultVersion} onChange={settings.setDefaultVersion} options={versions} />
+              <SettingLabel icon={Layers3}>Active profile version</SettingLabel>
+              <MinecraftVersionDropdown value={activeProfile?.version ?? '26.3'} onChange={(value) => { if (activeProfile) updateProfile(activeProfile.id, { version: value }); }} availableVersions={availableVersions} />
             </div>
             <div>
-              <Label>RAM allocation</Label>
+              <SettingLabel icon={HardDrive}>RAM allocation</SettingLabel>
               <Select value={String(settings.selectedRam)} onChange={(v) => settings.setSelectedRam(Number(v))} options={['4', '6', '8', '12', '16']} />
             </div>
             <div>
-              <Label>FPS limit</Label>
+              <SettingLabel icon={Monitor}>FPS limit</SettingLabel>
               <Select value={String(settings.fpsLimit)} onChange={(v) => settings.setFpsLimit(Number(v))} options={['60', '120', '144', '240']} />
             </div>
             <div>
-              <Label>Resolution</Label>
+              <SettingLabel icon={Monitor}>Resolution</SettingLabel>
               <Select value={settings.resolution} onChange={settings.setResolution} options={['1920x1080', '2560x1440', '3840x2160']} />
             </div>
             <div>
-              <Label>Render distance</Label>
+              <SettingLabel icon={Globe}>Render distance</SettingLabel>
               <Select value={settings.renderDistance} onChange={settings.setRenderDistance} options={['6 Chunks', '8 Chunks', '12 Chunks', '16 Chunks']} />
             </div>
-            <div className="md:col-span-2">
-              <Label>Java path</Label>
-              <input value={settings.javaPath} onChange={(e) => settings.setJavaPath(e.target.value)} className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20" />
-            </div>
-            <div className="md:col-span-2">
-              <Label>Custom launch arguments</Label>
-              <input value={settings.customArgs} onChange={(e) => settings.setCustomArgs(e.target.value)} className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20" />
-            </div>
+            <section className="settings-java-panel md:col-span-2">
+              <div className="settings-java-heading"><Download className="h-5 w-5" /><div><strong>Bayon Client Runtime</strong><p>Bayon checks for Java already installed on your device and automatically uses a compatible runtime for each profile.</p></div></div>
+              <div className="java-runtime-grid">
+                {[8, 11, 17, 21, 25].map((major) => {
+                  const runtime = javaRuntimes.find((item) => item.major === major);
+                  const progress = javaProgress[major];
+                  const busy = Boolean(installingJava[major]);
+                  return <article className="java-runtime-card" key={major}>
+                    <div className="java-runtime-copy"><div><strong>Java {major}</strong><span>{major <= 17 ? 'JRE' : 'JDK'}</span>{major === 25 && <em>Recommended</em>}</div><small>{busy ? progress?.status ?? `Preparing Java ${major}…` : runtime?.installed ? runtime.packageVersion || 'Managed runtime installed' : runtime?.systemJavaPath ? `Detected on device · ${runtime.systemPackageVersion}` : 'Not detected'}</small>{busy && <div className="java-runtime-progress"><span style={{ width: `${progress?.progress ?? 0}%` }} /></div>}</div>
+                    {runtime?.installed ? <button type="button" className="java-runtime-button" disabled={busy} onClick={() => void installJava(major)}>{busy ? <span className="java-spinner" /> : <RefreshCw className="h-4 w-4" />}{busy ? 'Installing…' : 'Reinstall'}</button> : runtime?.systemJavaPath ? <button type="button" className="java-runtime-button" onClick={() => settings.setJavaPath(runtime.systemJavaPath!)}>Use detected</button> : <button type="button" className="java-runtime-button" disabled={busy} onClick={() => void installJava(major)}>{busy ? <span className="java-spinner" /> : <Download className="h-4 w-4" />}{busy ? 'Installing…' : 'Install'}</button>}
+                  </article>;
+                })}
+              </div>
+            </section>
+            <section className="settings-tools-section md:col-span-2">
+              <div className="settings-tools-title">DIRECTORIES</div>
+              {([
+                ['gameData', 'Game Data Directory', directories?.gameDataDirectory, Gamepad2, true],
+                ['install', 'Install Directory', directories?.installDirectory, HardDrive, false],
+                ['configuration', 'Configuration Directory', directories?.configurationDirectory, Settings, false],
+                ['java', 'Java Directory', directories?.javaDirectory, Coffee, false],
+                ['logs', 'Logs Directory', directories?.logsDirectory, FileText, false],
+              ] as const).map(([key, label, location, Icon, canChange]) => <div className="settings-tool-row" key={key}>
+                <div className="settings-tool-info"><Icon className="h-5 w-5" /><div><strong>{label}</strong><span title={location || ''}>{location || 'Loading directory…'}</span></div></div>
+                <div className="settings-tool-actions">{canChange && <button type="button" className="settings-tool-button" onClick={() => void chooseGameDirectory()}>Change</button>}<button type="button" className="settings-tool-button" onClick={() => void openDirectory(key)}> <FolderOpen className="h-4 w-4" />Open</button></div>
+              </div>)}
+            </section>
+            <section className="settings-tools-section md:col-span-2">
+              <div className="settings-tools-title">RECOVERY</div>
+              <div className="settings-tool-row"><div className="settings-tool-info"><Terminal className="h-5 w-5" /><div><strong>Create Diagnostic Report</strong><span>Creates a redacted diagnostic file on this device. Nothing is uploaded.</span></div></div><button type="button" disabled={Boolean(recoveryBusy)} className="settings-tool-button" onClick={() => void createDiagnostic()}><Terminal className="h-4 w-4" />{recoveryBusy === 'diagnostic' ? 'Creating…' : 'Create Report'}</button></div>
+              <div className="settings-tool-row"><div className="settings-tool-info"><Coffee className="h-5 w-5" /><div><strong>Test Java Launch</strong><span>Check that the selected or automatically detected Java runtime starts.</span></div></div><button type="button" disabled={Boolean(recoveryBusy)} className="settings-tool-button" onClick={() => void runJavaTest()}><Coffee className="h-4 w-4" />{recoveryBusy === 'java' ? 'Testing…' : 'Test Java'}</button></div>
+              <div className="settings-tool-row settings-tool-row-danger"><div className="settings-tool-info"><AlertTriangle className="h-5 w-5" /><div><strong>Clear Data</strong><span>Remove local profiles, saves, downloaded game files, managed Java runtimes, and launcher preferences.</span></div></div><button type="button" disabled={Boolean(recoveryBusy)} className="settings-tool-button settings-tool-danger" onClick={() => setShowClearConfirm(true)}><Trash2 className="h-4 w-4" />Clear All Data</button></div>
+              {recoveryMessage && <p className="settings-recovery-status" role="status">{recoveryMessage}</p>}
+            </section>
+            <section className="settings-java-panel md:col-span-2">
+              <div className="settings-java-heading"><Coffee className="h-5 w-5" /><div><strong>Custom Java Path</strong><p>Choose your own Java executable instead of the automatically selected managed runtime.</p></div></div>
+              <div className="java-custom-path-row"><div className="java-custom-path-value">{settings.javaPath || 'Using auto-detected Java'}</div><button type="button" className="java-runtime-button" onClick={() => void browseJavaPath()}><FolderOpen className="h-4 w-4" />Browse</button>{settings.javaPath && <button type="button" className="java-auto-button" onClick={() => settings.setJavaPath('')}>Use automatic</button>}</div>
+            </section>
+            <section className="settings-java-panel md:col-span-2">
+              <div className="settings-java-heading"><FileText className="h-5 w-5" /><div><strong>Extra JVM Arguments</strong><p>Additional flags passed directly to Java when launching Minecraft. Each argument must start with a dash.</p></div></div>
+              <textarea value={argumentsDraft} onChange={(event) => { setArgumentsDraft(event.target.value); setArgumentsSaved(false); }} placeholder="-XX:+UseG1GC  -XX:MaxGCPauseMillis=50" className="java-arguments-input" rows={3} />
+              <button type="button" className="java-runtime-button java-save-button" onClick={saveArguments}><FileText className="h-4 w-4" />{argumentsSaved ? 'Arguments Saved' : 'Save Arguments'}</button>
+            </section>
+            {javaError && <p className="java-runtime-error md:col-span-2" role="alert">{javaError}</p>}
             <div>
-              <Label>Animation</Label>
+              <SettingLabel icon={Volume2}>Animation</SettingLabel>
               <Select value={settings.animationLevel} onChange={settings.setAnimationLevel} options={['Smooth', 'Balanced', 'Minimal']} />
             </div>
-            <div className="md:col-span-2">
-              <Label>Backend Server URL</Label>
-              <input
-                value={settings.backendUrl}
-                onChange={(e) => settings.setBackendUrl(e.target.value)}
-                placeholder="https://bayon-backend.onrender.com"
-                className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20"
-              />
-              <p className="mt-1 text-xs text-white/40">URL of your hosted backend on Render for Friends and Presence</p>
-            </div>
-            <SettingRow label="Reduce motion"><Toggle checked={settings.reduceMotion} onChange={settings.setReduceMotion} /></SettingRow>
+            <SettingRow label="Reduce motion" icon={MoonStar}><Toggle checked={settings.reduceMotion} onChange={settings.setReduceMotion} /></SettingRow>
           </div>
 
           <div className="mt-6 flex justify-end">
@@ -1312,6 +1651,11 @@ function SettingsPage() {
           </div>
         </GlassCard>
       </div>
+      {showClearConfirm && <Modal title="Clear all Bayon Client data?" onClose={() => setShowClearConfirm(false)}>
+        <p className="settings-clear-warning">This removes profiles and their saves, downloaded Minecraft files, managed Java runtimes, launcher preferences, and local accounts from this device. This cannot be undone.</p>
+        <p className="settings-clear-warning">Game data directory: <strong>{directories?.gameDataDirectory || 'Loading…'}</strong></p>
+        <div className="offline-form-actions"><button type="button" onClick={() => setShowClearConfirm(false)}>Cancel</button><button type="button" className="remove-confirm" disabled={Boolean(recoveryBusy)} onClick={() => void clearClientData()}>{recoveryBusy === 'clear' ? 'Clearing…' : 'Clear all data'}</button></div>
+      </Modal>}
     </motion.div>
   );
 }
@@ -1354,12 +1698,32 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boo
 }
 
 function Select({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
+  const [open, setOpen] = useState(false);
+  const selectRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => { if (!selectRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-white/10 bg-[#121212] px-3 py-2.5 text-sm text-white/80 outline-none transition focus:border-white/20">
-      {options.map((option) => (
-        <option key={option} value={option}>{option}</option>
-      ))}
-    </select>
+    <div ref={selectRef} className="settings-select-wrap">
+      <button type="button" role="combobox" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="settings-select-button">
+        <span>{value}</span><ChevronDown className={`h-4 w-4 text-sky-200/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="settings-select-menu" role="listbox">
+        {options.map((option) => <button key={option} type="button" role="option" aria-selected={value === option} onClick={() => { onChange(option); setOpen(false); }} className={value === option ? 'settings-select-option settings-select-option-active' : 'settings-select-option'}>
+          <span>{option}</span>{value === option && <span className="settings-select-selected">Selected</span>}
+        </button>)}
+      </div>}
+    </div>
   );
 }
 
@@ -1390,9 +1754,48 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function Modal({ title, children, onClose, className = '' }: { title: string; children: React.ReactNode; onClose: () => void; className?: string }) {
+function MinecraftAvatar({ username, skin, className }: { username: string; skin?: { imageUrl: string; legacy?: boolean }; className: string }) {
+  const palettes = [
+    { skin: '#d2a17d', hair: '#493025', eyes: '#5579b8', beard: '#603c2d' },
+    { skin: '#edc69f', hair: '#342820', eyes: '#5579b8', beard: '#493329' },
+    { skin: '#a86f4f', hair: '#211c1b', eyes: '#6688c5', beard: '#34221d' },
+    { skin: '#f0c6a4', hair: '#9a6335', eyes: '#6282bd', beard: '#7a4b2d' },
+    { skin: '#c58c69', hair: '#201a18', eyes: '#566fa7', beard: '#34231e' },
+  ];
+  const paletteIndex = Array.from(username).reduce((hash, character) => ((hash * 31) + character.charCodeAt(0)) >>> 0, 7) % palettes.length;
+  const palette = palettes[paletteIndex];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]">
+    <span className={`minecraft-avatar ${className}`} role="img" aria-label={`${username}'s Minecraft profile`}>
+      <svg viewBox={skin ? '8 8 8 8' : '0 0 8 8'} aria-hidden="true" shapeRendering="crispEdges" preserveAspectRatio="none">
+        {skin ? <>
+          <image href={skin.imageUrl} x="0" y="0" width="64" height={skin.legacy ? 32 : 64} />
+          <image href={skin.imageUrl} x="-32" y="0" width="64" height={skin.legacy ? 32 : 64} />
+        </> : <>
+          <rect x="1" y="0" width="6" height="1" fill={palette.hair} />
+          <rect x="0" y="1" width="1" height="6" fill={palette.hair} />
+          <rect x="1" y="1" width="6" height="6" fill={palette.skin} />
+          <rect x="7" y="1" width="1" height="6" fill={palette.hair} />
+          <rect x="1" y="1" width="6" height="1" fill={palette.hair} />
+          <rect x="1" y="2" width="1" height="1" fill={palette.hair} />
+          <rect x="6" y="2" width="1" height="1" fill={palette.hair} />
+          <rect x="2" y="3" width="2" height="1" fill="#f1eee8" />
+          <rect x="5" y="3" width="2" height="1" fill="#f1eee8" />
+          <rect x="3" y="3" width="1" height="1" fill={palette.eyes} />
+          <rect x="6" y="3" width="1" height="1" fill={palette.eyes} />
+          <rect x="4" y="4" width="1" height="1" fill="#ad7559" />
+          <rect x="2" y="5" width="4" height="1" fill={palette.beard} />
+          <rect x="3" y="6" width="2" height="1" fill={palette.beard} />
+        </>}
+      </svg>
+    </span>
+  );
+}
+
+function Modal({ title, children, onClose, className = '' }: { title: string; children: React.ReactNode; onClose: () => void; className?: string }) {
+  const isFullScreen = className.includes('mod-catalog-modal');
+  return (
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px] ${isFullScreen ? 'modal-fullscreen-backdrop' : ''}`}>
       <div className={`w-full max-w-md rounded-[24px] border border-white/10 bg-[#0d0d0d] p-4 shadow-[0_0_80px_rgba(0,0,0,0.55)] ${className}`}>
         <div className="mb-4 flex items-center justify-between">
           <div className="text-lg font-semibold text-white">{title}</div>
@@ -1408,10 +1811,14 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="mb-2 block text-sm text-white/70">{children}</label>;
 }
 
-function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingLabel({ children, icon: Icon }: { children: React.ReactNode; icon: LucideIcon }) {
+  return <Label><span className="settings-label"><Icon className="h-4 w-4" />{children}</span></Label>;
+}
+
+function SettingRow({ label, children, icon: Icon }: { label: string; children: React.ReactNode; icon?: LucideIcon }) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-white/10 bg-[#121212] px-3 py-3">
-      <span className="text-sm text-white/75">{label}</span>
+      <span className="settings-row-label">{Icon && <Icon className="h-4 w-4" />}<span className="text-sm text-white/75">{label}</span></span>
       {children}
     </div>
   );

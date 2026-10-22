@@ -6,6 +6,7 @@ export type OfflineAccount = {
   username: string;
   type: 'offline';
   createdAt: string;
+  skin?: { name: string; imageUrl: string; legacy?: boolean };
 };
 
 type AccountState = {
@@ -13,6 +14,7 @@ type AccountState = {
   activeAccountId: string | null;
   createOfflineAccount: (username: string) => OfflineAccount;
   selectAccount: (id: string) => void;
+  updateAccountSkin: (id: string, skin: OfflineAccount['skin'] | null) => void;
   removeAccount: (id: string) => void;
 };
 
@@ -42,6 +44,11 @@ export const useAccountStore = create<AccountState>()(
       selectAccount: (id) => {
         if (get().accounts.some((account) => account.id === id)) set({ activeAccountId: id });
       },
+      updateAccountSkin: (id, skin) => set((state) => ({
+        accounts: state.accounts.map((account) => account.id === id
+          ? { ...account, skin: skin ?? undefined }
+          : account),
+      })),
       removeAccount: (id) => set((state) => {
         const accounts = state.accounts.filter((account) => account.id !== id);
         const activeAccountId = state.activeAccountId === id ? accounts[0]?.id ?? null : state.activeAccountId;

@@ -1,4 +1,4 @@
-import { useSettingsStore } from '../store/useSettingsStore';
+import { BACKEND_BASE_URL } from './backendConfig';
 
 export type PartnerServer = {
   id: string;
@@ -15,9 +15,7 @@ export type PartnerServer = {
 };
 
 export async function fetchPartnerServers(signal?: AbortSignal): Promise<PartnerServer[]> {
-  const storeUrl = useSettingsStore.getState().backendUrl?.trim();
-  const baseUrl = storeUrl || import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3000';
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/servers`, {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/servers`, {
     method: 'GET',
     credentials: 'include',
     headers: { Accept: 'application/json' },

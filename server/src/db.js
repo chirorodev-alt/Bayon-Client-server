@@ -9,6 +9,7 @@ const dbFile = path.join(dataDir, 'db.json');
 const initialData = {
   users: [],
   friends: [],
+  redeemCodes: [],
 };
 
 function ensureDir() {
@@ -25,7 +26,11 @@ export function loadDb() {
   }
   try {
     const raw = fs.readFileSync(dbFile, 'utf-8');
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    data.users ??= [];
+    data.friends ??= [];
+    data.redeemCodes ??= [];
+    return data;
   } catch (err) {
     console.error('Failed to read db file, using memory fallback:', err);
     return initialData;

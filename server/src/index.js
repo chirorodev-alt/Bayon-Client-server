@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadDb, saveDb } from './db.js';
 
@@ -145,6 +146,12 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const cleanUsername = username.trim();
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(cleanUsername)) {
+      return res.status(400).json({ error: 'Username may contain only letters, numbers, and underscores.' });
+    }
+    if (password.length < 6 || password.length > 128) {
+      return res.status(400).json({ error: 'Password must be between 6 and 128 characters.' });
+    }
     if (db.users.some((u) => u.username.toLowerCase() === cleanUsername.toLowerCase())) {
       return res.status(409).json({ error: 'Username is already registered.' });
     }
@@ -159,6 +166,8 @@ app.post('/api/auth/register', async (req, res) => {
       status: 'online',
       avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(cleanUsername)}`,
       createdAt: new Date().toISOString(),
+      bacoins: 0,
+      ownedCosmetics: [],
     };
 
     db.users.push(newUser);
@@ -251,6 +260,103 @@ app.get('/api/auth/me', (req, res) => {
   } catch {
     res.status(401).json({ error: 'Invalid or expired token.' });
   }
+});
+
+// Bacoins and cosmetics are kept on the authenticated Bayon account. Offline
+// Minecraft profiles are intentionally not accepted as an identity here.
+const cosmeticCatalog = [
+  { id: 'ember-frame', name: 'Ember Frame', description: 'A warm ember colored profile frame.', category: 'Profile frame', price: 250, accent: '#f97316' },
+  { id: 'ender-glow', name: 'Ender Glow', description: 'A violet glow for your Bayon profile.', category: 'Profile effect', price: 400, accent: '#a855f7' },
+  { id: 'diamond-badge', name: 'Diamond Badge', description: 'Show off a polished diamond badge.', category: 'Badge', price: 600, accent: '#38bdf8' },
+  { id: 'gold-name', name: 'Golden Name', description: 'A golden name treatment in the client.', category: 'Name style', price: 800, accent: '#facc15' },
+];
+
+function authenticatedUser(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in to your Bayon account first.' });
+  try {
+    const payload = jwt.verify(header.slice(7), JWT_SECRET);
+    const user = db.users.find((candidate) => candidate.id === payload.id);
+    if (!user) return res.status(401).json({ error: 'Bayon account not found.' });
+    user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+    user.ownedCosmetics = Array.isArray(user.ownedCosmetics) ? user.ownedCosmetics : [];
+    req.bayonUser = user;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Sign in again to continue.' });
+  }
+}
+
+function publicBayonUser(user) {
+  return { id: user.id, username: user.username, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
+}
+
+app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: cosmeticCatalog }));
+
+app.get('/api/bacoins/me', authenticatedUser, (req, res) => {
+  res.json({ user: publicBayonUser(req.bayonUser) });
+});
+
+app.post('/api/bacoins/redeem', authenticatedUser, (req, res) => {
+  const normalized = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  if (!normalized || normalized.length > 80) return res.status(400).json({ error: 'Enter a valid redeem code.' });
+  const codeHash = crypto.createHash('sha256').update(normalized).digest('hex');
+  const record = db.redeemCodes.find((item) => item.codeHash === codeHash);
+  if (!record || record.disabled || (record.expiresAt && Date.parse(record.expiresAt) < Date.now())) {
+    return res.status(400).json({ error: 'This redeem code is invalid or expired.' });
+  }
+  record.claims ??= [];
+  if (record.claims.some((claim) => claim.userId === req.bayonUser.id)) return res.status(409).json({ error: 'This code has already been used on your account.' });
+  if (record.claims.length >= record.maxClaims) return res.status(409).json({ error: 'This redeem code has reached its claim limit.' });
+  const amount = Number(record.amount);
+  if (!Number.isSafeInteger(amount) || amount < 1 || req.bayonUser.bacoins + amount > Number.MAX_SAFE_INTEGER) {
+    return res.status(400).json({ error: 'This redeem code is not configured correctly.' });
+  }
+  record.claims.push({ userId: req.bayonUser.id, claimedAt: new Date().toISOString() });
+  req.bayonUser.bacoins += amount;
+  saveDb(db);
+  res.json({ user: publicBayonUser(req.bayonUser), credited: amount });
+});
+
+app.post('/api/cosmetics/:id/purchase', authenticatedUser, (req, res) => {
+  const cosmetic = cosmeticCatalog.find((item) => item.id === req.params.id);
+  if (!cosmetic) return res.status(404).json({ error: 'Cosmetic not found.' });
+  if (req.bayonUser.ownedCosmetics.includes(cosmetic.id)) return res.status(409).json({ error: 'You already own this cosmetic.' });
+  if (req.bayonUser.bacoins < cosmetic.price) return res.status(400).json({ error: 'You do not have enough Bacoins.' });
+  req.bayonUser.bacoins -= cosmetic.price;
+  req.bayonUser.ownedCosmetics.push(cosmetic.id);
+  saveDb(db);
+  res.json({ user: publicBayonUser(req.bayonUser), cosmetic });
+});
+
+app.post('/api/cosmetics/equip', authenticatedUser, (req, res) => {
+  const id = req.body?.id;
+  if (id !== null && (typeof id !== 'string' || !req.bayonUser.ownedCosmetics.includes(id))) {
+    return res.status(400).json({ error: 'You can equip only cosmetics you own.' });
+  }
+  req.bayonUser.equippedCosmetic = id;
+  saveDb(db);
+  res.json({ user: publicBayonUser(req.bayonUser) });
+});
+
+// Create codes from a trusted admin environment only. The plaintext code is
+// returned once; only its hash is persisted in db.json.
+app.post('/api/bacoins/admin/codes', (req, res) => {
+  const adminKey = process.env.BACOIN_ADMIN_KEY;
+  if (!adminKey || req.get('x-bayon-admin-key') !== adminKey) return res.status(401).json({ error: 'Unauthorized.' });
+  const amount = Number(req.body?.amount);
+  const maxClaims = Number(req.body?.maxClaims ?? 1);
+  const count = Number(req.body?.count ?? 1);
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000 || !Number.isSafeInteger(maxClaims) || maxClaims < 1 || maxClaims > 10_000 || !Number.isSafeInteger(count) || count < 1 || count > 100) {
+    return res.status(400).json({ error: 'amount, maxClaims, or count is out of range.' });
+  }
+  const codes = Array.from({ length: count }, () => {
+    const code = `BAYON-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+    db.redeemCodes.push({ codeHash: crypto.createHash('sha256').update(code).digest('hex'), amount, maxClaims, claims: [], createdAt: new Date().toISOString() });
+    return code;
+  });
+  saveDb(db);
+  res.status(201).json({ codes, amount, maxClaims });
 });
 
 // ── Partner Servers Directory & Live Status ───────────────────────────────────

@@ -1,4 +1,5 @@
 export type ModCatalogSource = 'modrinth' | 'curseforge';
+export type ModrinthProjectType = 'mod' | 'modpack' | 'resourcepack' | 'shader' | 'datapack';
 
 export type ModCatalogResult = {
   id: string;
@@ -17,6 +18,8 @@ export type ModSearchOptions = {
   query: string;
   gameVersion: string;
   loader: string;
+  projectType: ModrinthProjectType;
+  offset?: number;
 };
 
 export async function searchModCatalog(options: ModSearchOptions): Promise<ModCatalogResult[]> {

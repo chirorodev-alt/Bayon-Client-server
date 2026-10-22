@@ -3,6 +3,7 @@
 A lightweight, production-ready Node.js & Express backend for **Bayon Client** featuring:
 - **Friends & Presence API** (`GET /api/friends`, `POST /api/friends`, `PATCH /api/friends/:id/presence`, `DELETE /api/friends/:id`)
 - **Authentication & Accounts** (`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`)
+- **Bacoins & Cosmetics** (authenticated balances, redeem claims, and server-checked purchases)
 - **Health Check** (`GET /api/health`)
 - **CORS Configured** for Electron and Vite desktop clients
 - **Render Blueprint ready** configured for the **Singapore** region (`singapore`)
@@ -40,9 +41,24 @@ If you prefer creating a Web Service manually:
    - **Plan**: `Free`
 3. Add Environment Variable:
    - `JWT_SECRET`: (Enter a random secret string)
+   - `BACOIN_ADMIN_KEY`: (Use a separate random secret; keep it private)
 4. Click **Create Web Service**.
 
 ---
+
+## Bacoins and redeem codes
+
+Sign in or create a Bayon account from the Store page. Bacoins are stored per Bayon account on the backend; offline Minecraft profiles cannot access or redeem a balance. The Store currently accepts redeem codes and sells the configured cosmetics. Payment processing is not enabled.
+
+Create codes from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
+
+```powershell
+$headers = @{ 'x-bayon-admin-key' = $env:BACOIN_ADMIN_KEY }
+$body = @{ amount = 500; maxClaims = 1; count = 5 } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'https://<your-service-name>.onrender.com/api/bacoins/admin/codes' -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+`amount` is the Bacoins each code grants, `maxClaims` limits the total number of accounts that may claim each code, and `count` creates that many separate codes. The database stores only a SHA-256 hash of each code. The backend currently uses its existing JSON file database; deploy it with persistent storage before relying on balances or claims for long-term production use.
 
 ## Connecting Bayon Client to Your Backend
 
