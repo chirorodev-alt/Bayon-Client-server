@@ -23,3 +23,8 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
