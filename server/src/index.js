@@ -681,7 +681,12 @@ app.post('/api/admin/assets', requireAdmin, (req, res) => {
   res.status(201).json({ url: `/media/cosmetics/${id}${ext}`, name: path.basename(String(fileName || 'asset'), ext) });
 });
 
-app.get(adminPanelPath || '/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
+if (adminPanelPath) {
+  const adminPages = ['/create-codes', '/redeem-manager', '/account', '/upload-3d-cosmetic', '/cosmetic', '/cosmatic'];
+  app.get([adminPanelPath, ...adminPages.map((page) => `${adminPanelPath}${page}`)], (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
+} else {
+  app.get('/__admin_disabled__', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')));
+}
 
 app.get('/api/bacoins/me', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser) });
