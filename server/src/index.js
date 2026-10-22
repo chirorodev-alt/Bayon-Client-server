@@ -285,7 +285,7 @@ app.post('/api/auth/email/request', async (req, res) => {
   if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
     return res.status(400).json({ error: 'Create or select an offline Minecraft profile first.' });
   }
-  if (!process.env.RESEND_API_KEY || !process.env.BACOIN_EMAIL_FROM) {
+  if (!process.env.BREVO_API_KEY || !process.env.BACOIN_EMAIL_FROM) {
     return res.status(503).json({ error: 'Email sign-in is not configured on the Bayon server yet.' });
   }
   const now = Date.now();
@@ -294,15 +294,22 @@ app.post('/api/auth/email/request', async (req, res) => {
 
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   const codeHash = crypto.createHmac('sha256', JWT_SECRET).update(`${email}:${code}`).digest('hex');
-  const sendResponse = await fetch('https://api.resend.com/emails', {
+  const configuredSender = process.env.BACOIN_EMAIL_FROM.trim();
+  const senderMatch = configuredSender.match(/^(.*?)\s*<([^<>]+)>$/);
+  const senderEmail = senderMatch ? senderMatch[2].trim() : configuredSender;
+  const senderName = senderMatch ? senderMatch[1].trim() : 'Bayon Client';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
+    return res.status(503).json({ error: 'The Bayon email sender address is not configured correctly.' });
+  }
+  const sendResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      from: process.env.BACOIN_EMAIL_FROM,
-      to: [email],
+      sender: { name: senderName || 'Bayon Client', email: senderEmail },
+      to: [{ email }],
       subject: 'Your Bayon Client sign-in code',
-      text: `Your Bayon Client verification code is ${code}. It expires in 10 minutes. If you did not request it, ignore this email.`,
-      html: `<p>Your Bayon Client verification code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>`,
+      textContent: `Your Bayon Client verification code is ${code}. It expires in 10 minutes. If you did not request it, ignore this email.`,
+      htmlContent: `<p>Your Bayon Client verification code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>`,
     }),
   });
   if (!sendResponse.ok) {

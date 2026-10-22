@@ -18,6 +18,7 @@ import {
   Globe,
   HardDrive,
   ImagePlus,
+  KeyRound,
   Layers3,
   Minus,
   Monitor,
@@ -284,8 +285,8 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         </div>
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select edition-select" onClick={() => setEditionOpen(!editionOpen)}>
-            <span className="edition-cube">â–§</span>
-            <span className="title-select-copy"><strong>Minecraft</strong><small>Java Edition</small></span>
+            <span className="edition-cube"><KeyRound className="h-3.5 w-3.5" /></span>
+            <span className="title-select-copy"><strong>Sign in Email</strong><small>Bacoins account</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
           {editionOpen && <div className="title-popover email-auth-popover">
