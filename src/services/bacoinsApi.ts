@@ -1,8 +1,9 @@
 import { BACKEND_BASE_URL } from './backendConfig';
 
 const TOKEN_KEY = 'bayon-bacoins-token';
+const IDENTITY_KEY = 'bayon-bacoins-identity';
 
-export type BacoinsUser = { id: string; username: string; bacoins: number; ownedCosmetics: string[]; equippedCosmetic: string | null };
+export type BacoinsUser = { id: string; username: string; email?: string; bacoins: number; ownedCosmetics: string[]; equippedCosmetic: string | null };
 export type Cosmetic = { id: string; name: string; description: string; category: string; price: number; accent: string };
 
 export function getBacoinsToken() {
@@ -11,6 +12,18 @@ export function getBacoinsToken() {
 
 export function clearBacoinsToken() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(IDENTITY_KEY);
+  window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
+}
+
+export function getBacoinsIdentity() {
+  try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null') as { email?: string; username?: string } | null; }
+  catch { return null; }
+}
+
+function saveBacoinsIdentity(user: BacoinsUser) {
+  localStorage.setItem(IDENTITY_KEY, JSON.stringify({ email: user.email, username: user.username }));
+  window.dispatchEvent(new Event('bayon:bacoins-auth-changed'));
 }
 
 async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
@@ -28,32 +41,77 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   return data as T;
 }
 
+export function getGoogleClientId() {
+  return request<{ clientId: string | null }>('/api/auth/google/config', {}, false).then((result) => result.clientId);
+}
+
+export function requestEmailSignInCode(email: string, profileId: string, profileUsername: string) {
+  return request<{ success: boolean; message: string }>('/api/auth/email/request', {
+    method: 'POST', body: JSON.stringify({ email, offlineProfileId: profileId, offlineUsername: profileUsername }),
+  }, false);
+}
+
+export async function verifyEmailSignInCode(email: string, code: string, profileId: string, profileUsername: string) {
+  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/email/verify', {
+    method: 'POST', body: JSON.stringify({ email, code, offlineProfileId: profileId, offlineUsername: profileUsername }),
+  }, false);
+  localStorage.setItem(TOKEN_KEY, result.token);
+  saveBacoinsIdentity(result.user);
+  return result.user;
+}
+
 export async function authenticateBacoins(path: '/api/auth/register' | '/api/auth/login', username: string, password: string) {
   const result = await request<{ token: string; user: BacoinsUser }>(path, {
     method: 'POST', body: JSON.stringify({ username, password }),
   }, false);
   localStorage.setItem(TOKEN_KEY, result.token);
+  saveBacoinsIdentity(result.user);
   return result.user;
 }
 
-export function fetchBacoinsMe() {
-  return request<{ user: BacoinsUser }>('/api/bacoins/me').then((result) => result.user);
+export async function authenticateWithGoogle(clientId: string, profileId: string, profileUsername: string) {
+  if (!window.electronAPI?.startGoogleOAuth) throw new Error('Google linking is available in the Bayon desktop app.');
+  const authorization = await window.electronAPI.startGoogleOAuth(clientId);
+  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/google/exchange', {
+    method: 'POST', body: JSON.stringify({ ...authorization, offlineProfileId: profileId, offlineUsername: profileUsername }),
+  }, false);
+  localStorage.setItem(TOKEN_KEY, result.token);
+  saveBacoinsIdentity(result.user);
+  return result.user;
+}
+
+export async function linkGoogleToBayonAccount(clientId: string, profileId: string) {
+  if (!window.electronAPI?.startGoogleOAuth) throw new Error('Google linking is available in the Bayon desktop app.');
+  const authorization = await window.electronAPI.startGoogleOAuth(clientId);
+  return request<{ user: BacoinsUser }>('/api/auth/google/link', {
+    method: 'POST', body: JSON.stringify(authorization), headers: { 'X-Bayon-Offline-Profile': profileId },
+  }).then((result) => result.user);
+}
+
+export function linkOfflineProfile(profileId: string, username: string) {
+  return request<{ user: BacoinsUser }>('/api/auth/offline-profile', {
+    method: 'POST', body: JSON.stringify({ profileId, username }),
+  }).then((result) => result.user);
+}
+
+export function fetchBacoinsMe(profileId: string) {
+  return request<{ user: BacoinsUser }>('/api/bacoins/me', { headers: { 'X-Bayon-Offline-Profile': profileId } }).then((result) => result.user);
 }
 
 export function fetchCosmetics() {
   return request<{ cosmetics: Cosmetic[] }>('/api/cosmetics', {}, false).then((result) => result.cosmetics);
 }
 
-export function redeemBacoinsCode(code: string) {
+export function redeemBacoinsCode(code: string, profileId: string) {
   return request<{ user: BacoinsUser; credited: number }>('/api/bacoins/redeem', {
-    method: 'POST', body: JSON.stringify({ code }),
+    method: 'POST', body: JSON.stringify({ code }), headers: { 'X-Bayon-Offline-Profile': profileId },
   });
 }
 
-export function purchaseCosmetic(id: string) {
-  return request<{ user: BacoinsUser; cosmetic: Cosmetic }>(`/api/cosmetics/${encodeURIComponent(id)}/purchase`, { method: 'POST' });
+export function purchaseCosmetic(id: string, profileId: string) {
+  return request<{ user: BacoinsUser; cosmetic: Cosmetic }>(`/api/cosmetics/${encodeURIComponent(id)}/purchase`, { method: 'POST', headers: { 'X-Bayon-Offline-Profile': profileId } });
 }
 
-export function equipCosmetic(id: string | null) {
-  return request<{ user: BacoinsUser }>('/api/cosmetics/equip', { method: 'POST', body: JSON.stringify({ id }) });
+export function equipCosmetic(id: string | null, profileId: string) {
+  return request<{ user: BacoinsUser }>('/api/cosmetics/equip', { method: 'POST', body: JSON.stringify({ id }), headers: { 'X-Bayon-Offline-Profile': profileId } });
 }

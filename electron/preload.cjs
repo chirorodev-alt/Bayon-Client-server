@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppUpdateState: () => ipcRenderer.invoke('app-update:get-state'),
   checkForAppUpdate: () => ipcRenderer.invoke('app-update:check'),
   installAppUpdate: () => ipcRenderer.invoke('app-update:install'),
+  startGoogleOAuth: (clientId) => ipcRenderer.invoke('auth:google-start', clientId),
   onAppUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('app-update:state', listener);

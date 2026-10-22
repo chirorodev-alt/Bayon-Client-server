@@ -48,7 +48,15 @@ If you prefer creating a Web Service manually:
 
 ## Bacoins and redeem codes
 
-Sign in or create a Bayon account from the Store page. Bacoins are stored per Bayon account on the backend; offline Minecraft profiles cannot access or redeem a balance. The Store currently accepts redeem codes and sells the configured cosmetics. Payment processing is not enabled.
+To connect an offline Minecraft profile, select it in **Accounts**, open the **Minecraft / Java Edition** dropdown in the title bar, enter an email address, and request a verification code. Enter the six-digit code from that inbox to link the verified address to the selected profile. The Store contains no account password form; Bayon never asks for an email password or reads inbox contents. A code is single-use, expires after 10 minutes, and can be requested again after one minute. Each offline profile can be linked to one Bayon account, and Bacoins and cosmetic purchases stay with that Bayon account.
+
+Email sign-in uses [Resend's email API](https://resend.com/docs/api-reference/emails/send-email). Configure these variables in the backend service environment (for example, Render) and verify the sender domain/address with Resend:
+
+- `RESEND_API_KEY`: Resend API key. Keep it on the server; never put it in the launcher or commit it to source control.
+- `BACOIN_EMAIL_FROM`: verified sender, for example `Bayon Client <login@your-verified-domain.com>`.
+
+Until both are configured on the deployed backend, requesting a code returns an email-not-configured error. Google OAuth endpoints remain available as an optional alternative, but the app's Bacoins sign-in uses the email code flow.
+The Store currently accepts redeem codes and sells the configured cosmetics. Payment processing is not enabled.
 
 Create codes from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
 

@@ -9,7 +9,6 @@ import {
   Coffee,
   Coins,
   Gem,
-  LogOut,
   Radio,
   Download,
   FileImage,
@@ -19,7 +18,6 @@ import {
   Globe,
   HardDrive,
   ImagePlus,
-  KeyRound,
   Layers3,
   Minus,
   Monitor,
@@ -47,7 +45,7 @@ import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate 
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
-import { authenticateBacoins, clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
+import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, requestEmailSignInCode, verifyEmailSignInCode, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
@@ -223,7 +221,47 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [editionOpen, setEditionOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailNotice, setEmailNotice] = useState('');
+  const [bacoinsIdentity, setBacoinsIdentity] = useState(getBacoinsIdentity);
   const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
+
+  useEffect(() => {
+    const refreshIdentity = () => setBacoinsIdentity(getBacoinsIdentity());
+    const openEmailSignIn = () => { setEditionOpen(true); setEmailError(''); setEmailNotice(''); };
+    window.addEventListener('bayon:bacoins-auth-changed', refreshIdentity);
+    window.addEventListener('bayon:open-email-sign-in', openEmailSignIn);
+    return () => {
+      window.removeEventListener('bayon:bacoins-auth-changed', refreshIdentity);
+      window.removeEventListener('bayon:open-email-sign-in', openEmailSignIn);
+    };
+  }, []);
+
+  const requestEmailCode = async () => {
+    if (!activeAccount) { setEmailError('Select an offline Minecraft profile first.'); return; }
+    setEmailBusy(true); setEmailError(''); setEmailNotice('');
+    try {
+      const result = await requestEmailSignInCode(email, activeAccount.id, activeAccount.username);
+      setCodeSent(true); setEmailNotice(result.message || 'Check your inbox for the six-digit verification code.');
+    } catch (cause) { setEmailError(cause instanceof Error ? cause.message : 'Could not send the email code.'); }
+    finally { setEmailBusy(false); }
+  };
+
+  const verifyEmailCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeAccount) { setEmailError('Select an offline Minecraft profile first.'); return; }
+    setEmailBusy(true); setEmailError(''); setEmailNotice('');
+    try {
+      await verifyEmailSignInCode(email, verificationCode, activeAccount.id, activeAccount.username);
+      setBacoinsIdentity(getBacoinsIdentity()); setCodeSent(false); setVerificationCode(''); setEmailNotice('Email verified and linked to this profile.');
+      setEditionOpen(false);
+    } catch (cause) { setEmailError(cause instanceof Error ? cause.message : 'Could not verify that code.'); }
+    finally { setEmailBusy(false); }
+  };
 
   return (
     <div className="title-bar">
@@ -250,7 +288,25 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
             <span className="title-select-copy"><strong>Minecraft</strong><small>Java Edition</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
-          {editionOpen && <div className="title-popover"><strong>Game edition</strong><span>Java Edition</span><button type="button" onClick={() => setEditionOpen(false)}>Selected</button></div>}
+          {editionOpen && <div className="title-popover email-auth-popover">
+            <strong>Bacoins email sign-in</strong>
+            {bacoinsIdentity?.email ? <>
+              <span>Signed in as {bacoinsIdentity.email}</span>
+              <span>Bacoins access is limited to offline profiles linked to this email account.</span>
+              <button type="button" onClick={() => { clearBacoinsToken(); setCodeSent(false); setVerificationCode(''); setEmailNotice(''); }}>Sign out</button>
+            </> : <>
+              <span>Verify your email to link {activeAccount?.username ?? 'your offline profile'} and use Bacoins.</span>
+              <label>Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={emailBusy || codeSent} /></label>
+              {!codeSent ? <button type="button" onClick={() => void requestEmailCode()} disabled={emailBusy || !activeAccount}>{emailBusy ? 'Sending code…' : 'Send verification code'}</button> : <form onSubmit={(event) => void verifyEmailCode(event)}>
+                <label>Six-digit code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" required /></label>
+                <button type="submit" disabled={emailBusy || verificationCode.length !== 6}>{emailBusy ? 'Verifying…' : 'Verify and link'}</button>
+                <button type="button" onClick={() => { setCodeSent(false); setVerificationCode(''); setEmailNotice(''); }}>Use another email</button>
+              </form>}
+              {emailError && <span className="email-auth-error" role="alert">{emailError}</span>}
+              {emailNotice && <span className="email-auth-notice" role="status">{emailNotice}</span>}
+              <small>Bayon sends a one-time code. It never asks for your email password.</small>
+            </>}
+          </div>}
         </div>
         <div className="title-dropdown-wrap">
           <button type="button" onClick={() => setNotificationOpen(!notificationOpen)} className="window-control" aria-label="Notifications"><Bell className="h-4 w-4" /></button>
@@ -592,11 +648,9 @@ function HomePage() {
 }
 
 function StorePage() {
+  const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const [user, setUser] = useState<BacoinsUser | null>(null);
   const [cosmetics, setCosmetics] = useState<Cosmetic[]>([]);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -605,26 +659,40 @@ function StorePage() {
 
   useEffect(() => {
     void fetchCosmetics().then(setCosmetics).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not load the cosmetic shop.'));
-    if (getBacoinsToken()) void fetchBacoinsMe().then(setUser).catch((cause: unknown) => {
-      clearBacoinsToken(); setSignedIn(false); setUser(null);
-      setError(cause instanceof Error ? cause.message : 'Please sign in again.');
-    });
   }, []);
 
-  const submitAuth = async (event: React.FormEvent) => {
-    event.preventDefault(); setBusy('auth'); setError(''); setNotice('');
-    try {
-      await authenticateBacoins(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, username, password);
-      const account = await fetchBacoinsMe(); setUser(account); setSignedIn(true); setPassword('');
-      setNotice(`Welcome, ${account.username}. Your Bacoins balance is ready.`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not sign in.'); }
-    finally { setBusy(''); }
-  };
+  useEffect(() => {
+    if (!getBacoinsToken() || !activeAccount) { setSignedIn(false); setUser(null); return; }
+    let active = true;
+    void fetchBacoinsMe(activeAccount.id).then((account) => {
+      if (!active) return;
+      setUser(account); setSignedIn(true); setError('');
+    }).catch((cause: unknown) => {
+      if (!active) return;
+      const message = cause instanceof Error ? cause.message : 'Could not load your Bayon account.';
+      if (message.includes('Connect this offline profile')) {
+        setSignedIn(false); setUser(null); setError('');
+      } else {
+        setSignedIn(false); setUser(null); setError(message);
+      }
+    });
+    return () => { active = false; };
+  }, [activeAccount?.id]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (!getBacoinsToken() || !activeAccount) { setSignedIn(false); setUser(null); return; }
+      void fetchBacoinsMe(activeAccount.id).then((account) => { setUser(account); setSignedIn(true); }).catch(() => { setSignedIn(false); setUser(null); });
+    };
+    window.addEventListener('bayon:bacoins-auth-changed', refresh);
+    return () => window.removeEventListener('bayon:bacoins-auth-changed', refresh);
+  }, [activeAccount?.id]);
 
   const redeem = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy('redeem'); setError(''); setNotice('');
     try {
-      const result = await redeemBacoinsCode(code); setUser(result.user); setCode(''); setNotice(`${result.credited} Bacoins added to your balance.`);
+      if (!activeAccount) throw new Error('Select an offline profile first.');
+      const result = await redeemBacoinsCode(code, activeAccount.id); setUser(result.user); setCode(''); setNotice(`${result.credited} Bacoins added to your balance.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not redeem code.'); }
     finally { setBusy(''); }
   };
@@ -632,19 +700,18 @@ function StorePage() {
   const buy = async (item: Cosmetic) => {
     setBusy(item.id); setError(''); setNotice('');
     try {
-      const result = await purchaseCosmetic(item.id); setUser(result.user); setNotice(`${item.name} added to your cosmetics.`);
+      if (!activeAccount) throw new Error('Select an offline profile first.');
+      const result = await purchaseCosmetic(item.id, activeAccount.id); setUser(result.user); setNotice(`${item.name} added to your cosmetics.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not purchase cosmetic.'); }
     finally { setBusy(''); }
   };
 
   const equip = async (id: string | null) => {
     setBusy('equip'); setError(''); setNotice('');
-    try { const result = await equipCosmetic(id); setUser(result.user); setNotice(id ? 'Cosmetic equipped on your Bayon profile.' : 'Profile cosmetic removed.'); }
+    try { if (!activeAccount) throw new Error('Select an offline profile first.'); const result = await equipCosmetic(id, activeAccount.id); setUser(result.user); setNotice(id ? 'Cosmetic equipped on your Bayon profile.' : 'Profile cosmetic removed.'); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update your profile cosmetic.'); }
     finally { setBusy(''); }
   };
-
-  const signOut = () => { clearBacoinsToken(); setUser(null); setSignedIn(false); setNotice('Signed out of your Bayon account.'); setError(''); };
 
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
     <div className="mx-auto max-w-6xl">
@@ -655,13 +722,12 @@ function StorePage() {
       {error && <div role="alert" className="mb-4 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
       {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
 
-      {!signedIn ? <GlassCard className="mb-5 p-5">
-        <div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-white/5"><UserRound className="h-5 w-5 text-sky-100" /></div><div><h2 className="font-semibold">Sign in to your Bayon account</h2><p className="mt-1 text-xs text-white/45">Your Bacoins and purchased cosmetics are saved to this account. Minecraft offline profiles do not sign in here.</p></div></div>
-        <form onSubmit={(event) => void submitAuth(event)} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"><input required minLength={3} maxLength={16} autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Bayon username" className="rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm outline-none focus:border-sky-300/40" /><input required type="password" minLength={6} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (6+ characters)" className="rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm outline-none focus:border-sky-300/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-sky-100 disabled:opacity-50">{busy === 'auth' ? 'Please wait…' : authMode === 'login' ? 'Sign in' : 'Create account'}</button></form>
-        <button type="button" className="mt-3 text-xs text-sky-200/80 hover:text-sky-100" onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setError(''); }}>{authMode === 'login' ? 'New here? Create a Bayon account' : 'Already have an account? Sign in'}</button>
+      {!signedIn ? <GlassCard className="mb-5 flex flex-wrap items-center justify-between gap-5 p-5">
+        <div><h2 className="font-semibold">Sign in with email</h2><p className="mt-1 text-xs text-white/45">Use the Minecraft Java Edition menu to verify your email and connect {activeAccount?.username ?? 'an offline profile'}.</p></div>
+        <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-email-sign-in'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open email sign-in</button>
       </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
         <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
-        <GlassCard className="flex items-center justify-between gap-5 p-5"><div><strong className="block">Signed in as {user?.username}</strong><span className="mt-1 block text-xs text-white/45">Account balance and owned items sync with the server.</span></div><button type="button" onClick={signOut} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:bg-white/5"><LogOut className="h-4 w-4" />Sign out</button></GlassCard>
+        <GlassCard className="flex flex-wrap items-center justify-between gap-5 p-5"><div><strong className="block">Signed in as {user?.email ?? getBacoinsIdentity()?.email ?? user?.username}</strong><span className="mt-1 block text-xs text-white/45">Connected to Minecraft profile {activeAccount?.username ?? ''}. Manage sign-in in the Minecraft Java Edition menu.</span></div></GlassCard>
       </div>}
 
       <div className="mb-4 flex items-center gap-2"><Sparkles className="h-4 w-4 text-sky-200" /><h2 className="text-base font-semibold">Cosmetics</h2><span className="text-xs text-white/40">{cosmetics.length} items</span></div>
@@ -786,6 +852,7 @@ function DiscordPresenceCard() {
 }
 
 function AccountsPage() {
+  const navigate = useNavigate();
   const accounts = useAccountStore((state) => state.accounts);
   const activeAccountId = useAccountStore((state) => state.activeAccountId);
   const createOfflineAccount = useAccountStore((state) => state.createOfflineAccount);
@@ -822,9 +889,9 @@ function AccountsPage() {
             <button type="button" onClick={() => { setError(''); setCreateOpen(true); }}>Create</button>
           </GlassCard>
           <GlassCard className="account-type-card account-microsoft-card">
-            <div className="account-type-icon"><KeyRound className="h-5 w-5" /></div>
-            <div><strong>Microsoft account</strong><p>Microsoft / Xbox authentication has not been implemented yet.</p></div>
-            <button type="button" disabled aria-disabled="true">Coming later</button>
+            <div className="account-type-icon"><Globe className="h-5 w-5" /></div>
+            <div><strong>Email account</strong><p>Verify an email address to sync this offline profile's Bacoins and cosmetics.</p></div>
+            <button type="button" onClick={() => navigate('/store')}>Connect</button>
           </GlassCard>
         </div>
         <GlassCard className="account-list-card">
@@ -837,6 +904,7 @@ function AccountsPage() {
                 <MinecraftAvatar username={account.username} skin={account.skin} className="avatar-large" />
                 <div className="account-row-copy"><strong>{account.username}</strong><small>Offline profile Â· created {new Date(account.createdAt).toLocaleDateString()}</small></div>
                 {activeAccountId === account.id ? <span className="account-active-badge">Active</span> : <button type="button" className="account-select-button" onClick={() => selectAccount(account.id)}>Use account</button>}
+                <button type="button" className="account-select-button" onClick={() => { selectAccount(account.id); navigate('/store'); }}>Connect Bacoins</button>
                 <button type="button" className="account-remove-button" onClick={() => setConfirmRemove(account.id)} aria-label={`Remove ${account.username}`}>Remove</button>
               </div>
             ))}</div>

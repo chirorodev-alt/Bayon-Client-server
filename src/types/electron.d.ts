@@ -136,6 +136,7 @@ declare global {
       getAppUpdateState: () => Promise<AppUpdateState>;
       checkForAppUpdate: () => Promise<AppUpdateState>;
       installAppUpdate: () => Promise<boolean>;
+      startGoogleOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;
       onAppUpdateState: (callback: (state: AppUpdateState) => void) => () => void;
       onJavaRuntimeProgress: (callback: (data: JavaRuntimeProgress) => void) => () => void;
       openModProject: (source: ModCatalogSource, projectUrl: string) => Promise<void>;

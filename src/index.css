@@ -284,6 +284,49 @@ input[type='range'] {
   text-align: left;
 }
 
+.email-auth-popover {
+  width: 310px;
+  max-width: calc(100vw - 24px);
+  line-height: 1.45;
+}
+
+.email-auth-popover label {
+  display: grid;
+  gap: 5px;
+  color: #a8b4c2;
+}
+
+.email-auth-popover input {
+  width: 100%;
+  border: 1px solid #293543;
+  border-radius: 6px;
+  background: #111820;
+  padding: 8px 9px;
+  color: #eef3f8;
+  outline: none;
+}
+
+.email-auth-popover input:focus {
+  border-color: #7da9d8;
+}
+
+.email-auth-popover form {
+  display: grid;
+  gap: 8px;
+}
+
+.email-auth-popover small {
+  color: #7f8c9b;
+}
+
+.email-auth-popover .email-auth-error {
+  color: #fca5a5;
+}
+
+.email-auth-popover .email-auth-notice {
+  color: #86efac;
+}
+
 .notification-popover {
   right: -26px;
 }

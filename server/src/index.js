@@ -36,6 +36,8 @@ app.use(express.json());
 
 // Load in-memory DB state with file sync
 let db = loadDb();
+const emailLoginChallenges = new Map();
+const emailRequestTimes = new Map();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -271,6 +273,202 @@ const cosmeticCatalog = [
   { id: 'gold-name', name: 'Golden Name', description: 'A golden name treatment in the client.', category: 'Name style', price: 800, accent: '#facc15' },
 ];
 
+app.get('/api/auth/google/config', (_req, res) => {
+  res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
+});
+
+app.post('/api/auth/email/request', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const profileId = req.body?.offlineProfileId;
+  const profileUsername = req.body?.offlineUsername;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
+    return res.status(400).json({ error: 'Create or select an offline Minecraft profile first.' });
+  }
+  if (!process.env.RESEND_API_KEY || !process.env.BACOIN_EMAIL_FROM) {
+    return res.status(503).json({ error: 'Email sign-in is not configured on the Bayon server yet.' });
+  }
+  const now = Date.now();
+  const previousRequest = emailRequestTimes.get(email) || 0;
+  if (now - previousRequest < 60_000) return res.status(429).json({ error: 'Wait one minute before requesting another code.' });
+
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const codeHash = crypto.createHmac('sha256', JWT_SECRET).update(`${email}:${code}`).digest('hex');
+  const sendResponse = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: process.env.BACOIN_EMAIL_FROM,
+      to: [email],
+      subject: 'Your Bayon Client sign-in code',
+      text: `Your Bayon Client verification code is ${code}. It expires in 10 minutes. If you did not request it, ignore this email.`,
+      html: `<p>Your Bayon Client verification code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>`,
+    }),
+  });
+  if (!sendResponse.ok) {
+    console.error('Email provider rejected a Bayon sign-in message:', await sendResponse.text());
+    return res.status(502).json({ error: 'Could not send the email code. Check the server email configuration.' });
+  }
+  emailRequestTimes.set(email, now);
+  emailLoginChallenges.set(email, { codeHash, expiresAt: now + 10 * 60_000, attempts: 0, profileId, profileUsername });
+  res.json({ success: true, message: 'If the email can receive mail, a verification code has been sent.' });
+});
+
+app.post('/api/auth/email/verify', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const challenge = emailLoginChallenges.get(email);
+  if (!challenge || challenge.expiresAt <= Date.now()) {
+    emailLoginChallenges.delete(email);
+    return res.status(400).json({ error: 'That code is missing or expired. Request a new one.' });
+  }
+  if (challenge.profileId !== req.body?.offlineProfileId || challenge.profileUsername !== req.body?.offlineUsername) {
+    return res.status(400).json({ error: 'The selected Minecraft profile changed. Request a new code for this profile.' });
+  }
+  const submittedHash = crypto.createHmac('sha256', JWT_SECRET).update(`${email}:${code}`).digest('hex');
+  const expected = Buffer.from(challenge.codeHash, 'hex');
+  const actual = Buffer.from(submittedHash, 'hex');
+  if (!/^\d{6}$/.test(code) || actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+    challenge.attempts += 1;
+    if (challenge.attempts >= 5) emailLoginChallenges.delete(email);
+    return res.status(400).json({ error: challenge.attempts >= 5 ? 'Too many wrong attempts. Request a new code.' : 'That verification code is incorrect.' });
+  }
+  emailLoginChallenges.delete(email);
+  let user = db.users.find((candidate) => [candidate.email, candidate.googleEmail].some((value) => typeof value === 'string' && value.toLowerCase() === email));
+  if (!user) {
+    const base = `e_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 10)}`;
+    let username = base;
+    let suffix = 1;
+    while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
+    user = {
+      id: `user-${crypto.randomUUID()}`, username, email, emailVerifiedAt: new Date().toISOString(), status: 'online',
+      avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(username)}`, createdAt: new Date().toISOString(),
+      bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [],
+    };
+    db.users.push(user);
+  } else {
+    user.email = email;
+    user.emailVerifiedAt ||= new Date().toISOString();
+  }
+  try {
+    linkOfflineProfileToUser(user, challenge.profileId, challenge.profileUsername);
+  } catch (err) {
+    return res.status(err.statusCode || 409).json({ error: err.message || 'Could not connect this offline profile.' });
+  }
+  user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+  user.ownedCosmetics = Array.isArray(user.ownedCosmetics) ? user.ownedCosmetics : [];
+  user.status = 'online';
+  saveDb(db);
+  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ success: true, token, user: publicBayonUser(user) });
+});
+
+async function verifyGoogleCredential(credential) {
+  if (!process.env.GOOGLE_CLIENT_ID) throw new Error('Google Sign-In is not configured on the Bayon server.');
+  if (typeof credential !== 'string' || credential.length > 10_000) throw new Error('Google did not return a valid sign-in credential.');
+  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  if (!response.ok) throw new Error('Google could not verify this sign-in. Please try again.');
+  const identity = await response.json();
+  const validIssuer = identity.iss === 'accounts.google.com' || identity.iss === 'https://accounts.google.com';
+  if (identity.aud !== process.env.GOOGLE_CLIENT_ID || identity.email_verified !== 'true' || !identity.sub || !identity.email || !validIssuer || Number(identity.exp) * 1000 <= Date.now()) {
+    throw new Error('Google account verification failed.');
+  }
+  return identity;
+}
+
+async function exchangeGoogleAuthorization({ code, codeVerifier, redirectUri }) {
+  if (!process.env.GOOGLE_CLIENT_ID) throw new Error('Google Sign-In is not configured on the Bayon server.');
+  if (typeof code !== 'string' || code.length > 4096 || typeof codeVerifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier)) {
+    throw new Error('Invalid Google authorization response.');
+  }
+  const parsedRedirect = new URL(redirectUri);
+  if (parsedRedirect.protocol !== 'http:' || parsedRedirect.hostname !== '127.0.0.1' || !/^\d+$/.test(parsedRedirect.port) || parsedRedirect.pathname !== '/oauth2callback' || parsedRedirect.search || parsedRedirect.hash) {
+    throw new Error('Invalid local Google callback address.');
+  }
+  const tokenBody = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    code,
+    code_verifier: codeVerifier,
+    grant_type: 'authorization_code',
+    redirect_uri: parsedRedirect.toString(),
+  });
+  if (process.env.GOOGLE_CLIENT_SECRET) tokenBody.set('client_secret', process.env.GOOGLE_CLIENT_SECRET);
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: tokenBody,
+  });
+  const tokenData = await tokenResponse.json();
+  if (!tokenResponse.ok || !tokenData.id_token) throw new Error('Google authorization code exchange failed. Please try again.');
+  return verifyGoogleCredential(tokenData.id_token);
+}
+
+function linkOfflineProfileToUser(user, profileId, profileUsername) {
+  if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
+    throw new Error('Select a valid offline Minecraft profile first.');
+  }
+  for (const candidate of db.users) {
+    candidate.linkedOfflineProfiles ??= [];
+    if (candidate.id !== user.id && candidate.linkedOfflineProfiles.some((profile) => profile.id === profileId)) {
+      throw new Error('This offline profile is already linked to another Bayon account.');
+    }
+  }
+  user.linkedOfflineProfiles ??= [];
+  const existing = user.linkedOfflineProfiles.find((profile) => profile.id === profileId);
+  if (existing) existing.username = profileUsername;
+  else user.linkedOfflineProfiles.push({ id: profileId, username: profileUsername, linkedAt: new Date().toISOString() });
+}
+
+async function createGoogleSession(identity, profileId, profileUsername) {
+    if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
+      throw new Error('Select a valid offline Minecraft profile first.');
+    }
+    let user = db.users.find((candidate) => candidate.googleSubject === identity.sub);
+    const profileOwner = db.users.find((candidate) => candidate.linkedOfflineProfiles?.some((profile) => profile.id === profileId));
+    if (profileOwner && profileOwner.id !== user?.id) {
+      const error = new Error('This offline profile is already linked to another Bayon account.');
+      error.statusCode = 409;
+      throw error;
+    }
+    if (!user) {
+      const base = `g_${identity.sub.slice(-10)}`;
+      let username = base;
+      let suffix = 1;
+      while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) {
+        username = `${base.slice(0, 13)}${suffix++}`;
+      }
+      user = {
+        id: `user-${crypto.randomUUID()}`,
+        username,
+        googleSubject: identity.sub,
+        googleEmail: identity.email,
+        status: 'online',
+        avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(username)}`,
+        createdAt: new Date().toISOString(),
+        bacoins: 0,
+        ownedCosmetics: [],
+        linkedOfflineProfiles: [],
+      };
+      db.users.push(user);
+    } else {
+      user.googleEmail = identity.email;
+    }
+    linkOfflineProfileToUser(user, req.body?.offlineProfileId, req.body?.offlineUsername);
+    user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
+    user.ownedCosmetics = Array.isArray(user.ownedCosmetics) ? user.ownedCosmetics : [];
+    user.status = 'online';
+    saveDb(db);
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    return { success: true, token, user: publicBayonUser(user) };
+}
+
+app.post('/api/auth/google/exchange', async (req, res) => {
+  try {
+    const identity = await exchangeGoogleAuthorization(req.body || {});
+    res.json(await createGoogleSession(identity, req.body?.offlineProfileId, req.body?.offlineUsername));
+  } catch (err) {
+    res.status(err.statusCode || (err.message.includes('not configured') ? 503 : 400)).json({ error: err.message || 'Google sign-in failed.' });
+  }
+});
+
 function authenticatedUser(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in to your Bayon account first.' });
@@ -287,17 +485,49 @@ function authenticatedUser(req, res, next) {
   }
 }
 
+function requireLinkedOfflineProfile(req, res, next) {
+  const profileId = req.get('x-bayon-offline-profile');
+  if (!profileId || !req.bayonUser.linkedOfflineProfiles?.some((profile) => profile.id === profileId)) {
+    return res.status(403).json({ error: 'Connect this offline profile to a Bayon or Google account first.' });
+  }
+  next();
+}
+
+app.post('/api/auth/offline-profile', authenticatedUser, (req, res) => {
+  try {
+    linkOfflineProfileToUser(req.bayonUser, req.body?.profileId, req.body?.username);
+    saveDb(db);
+    res.json({ user: publicBayonUser(req.bayonUser) });
+  } catch (err) {
+    res.status(409).json({ error: err.message || 'Could not connect this offline profile.' });
+  }
+});
+
+app.post('/api/auth/google/link', authenticatedUser, requireLinkedOfflineProfile, async (req, res) => {
+  try {
+    const identity = await exchangeGoogleAuthorization(req.body || {});
+    const owner = db.users.find((user) => user.googleSubject === identity.sub && user.id !== req.bayonUser.id);
+    if (owner) return res.status(409).json({ error: 'This Google account is already connected to another Bayon account.' });
+    req.bayonUser.googleSubject = identity.sub;
+    req.bayonUser.googleEmail = identity.email;
+    saveDb(db);
+    res.json({ user: publicBayonUser(req.bayonUser) });
+  } catch (err) {
+    res.status(err.message.includes('not configured') ? 503 : 400).json({ error: err.message || 'Could not connect this Google account.' });
+  }
+});
+
 function publicBayonUser(user) {
-  return { id: user.id, username: user.username, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
+  return { id: user.id, username: user.username, email: user.email || user.googleEmail || undefined, bacoins: user.bacoins || 0, ownedCosmetics: user.ownedCosmetics || [], equippedCosmetic: user.equippedCosmetic || null };
 }
 
 app.get('/api/cosmetics', (_req, res) => res.json({ cosmetics: cosmeticCatalog }));
 
-app.get('/api/bacoins/me', authenticatedUser, (req, res) => {
+app.get('/api/bacoins/me', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser) });
 });
 
-app.post('/api/bacoins/redeem', authenticatedUser, (req, res) => {
+app.post('/api/bacoins/redeem', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   const normalized = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
   if (!normalized || normalized.length > 80) return res.status(400).json({ error: 'Enter a valid redeem code.' });
   const codeHash = crypto.createHash('sha256').update(normalized).digest('hex');
@@ -318,7 +548,7 @@ app.post('/api/bacoins/redeem', authenticatedUser, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser), credited: amount });
 });
 
-app.post('/api/cosmetics/:id/purchase', authenticatedUser, (req, res) => {
+app.post('/api/cosmetics/:id/purchase', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   const cosmetic = cosmeticCatalog.find((item) => item.id === req.params.id);
   if (!cosmetic) return res.status(404).json({ error: 'Cosmetic not found.' });
   if (req.bayonUser.ownedCosmetics.includes(cosmetic.id)) return res.status(409).json({ error: 'You already own this cosmetic.' });
@@ -329,7 +559,7 @@ app.post('/api/cosmetics/:id/purchase', authenticatedUser, (req, res) => {
   res.json({ user: publicBayonUser(req.bayonUser), cosmetic });
 });
 
-app.post('/api/cosmetics/equip', authenticatedUser, (req, res) => {
+app.post('/api/cosmetics/equip', authenticatedUser, requireLinkedOfflineProfile, (req, res) => {
   const id = req.body?.id;
   if (id !== null && (typeof id !== 'string' || !req.bayonUser.ownedCosmetics.includes(id))) {
     return res.status(400).json({ error: 'You can equip only cosmetics you own.' });

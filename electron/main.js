@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
+import http from 'node:http';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -77,6 +79,77 @@ function assertTrustedRenderer(event) {
   if (!isDevRenderer && !isFileRenderer) {
     throw new Error('Renderer origin is not allowed.');
   }
+}
+
+function startGoogleOAuth(clientId) {
+  if (typeof clientId !== 'string' || clientId.length > 512 || !clientId.endsWith('.apps.googleusercontent.com')) {
+    return Promise.reject(new Error('Google OAuth client ID is invalid.'));
+  }
+  const state = randomBytes(32).toString('base64url');
+  const verifier = randomBytes(48).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      server.close();
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const server = http.createServer((request, response) => {
+      const callbackUrl = new URL(request.url || '/', 'http://127.0.0.1');
+      if (callbackUrl.pathname !== '/oauth2callback') {
+        response.writeHead(404).end('Not found');
+        return;
+      }
+      const receivedState = callbackUrl.searchParams.get('state') || '';
+      const expectedState = Buffer.from(state);
+      const actualState = Buffer.from(receivedState);
+      if (actualState.length !== expectedState.length || !timingSafeEqual(actualState, expectedState)) {
+        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Bayon Client sign-in failed</h2><p>State verification failed. You can close this tab.</p>');
+        finish(new Error('Google sign-in state verification failed.'));
+        return;
+      }
+      const error = callbackUrl.searchParams.get('error');
+      const code = callbackUrl.searchParams.get('code');
+      if (error || !code) {
+        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Bayon Client sign-in cancelled</h2><p>You can close this tab and return to the client.</p>');
+        finish(new Error(error === 'access_denied' ? 'Google sign-in was cancelled.' : 'Google did not return an authorization code.'));
+        return;
+      }
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Google account connected</h2><p>You can close this tab and return to Bayon Client.</p>');
+      finish(null, { code, codeVerifier: verifier, redirectUri });
+    });
+
+    server.once('error', (error) => finish(error));
+    server.listen(0, '127.0.0.1', async () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') return finish(new Error('Could not start the local sign-in callback.'));
+      const redirectUri = `http://127.0.0.1:${address.port}/oauth2callback`;
+      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      authUrl.search = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'openid email profile',
+        state,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        prompt: 'select_account',
+      }).toString();
+      timeout = setTimeout(() => finish(new Error('Google sign-in timed out. Please try again.')), 4 * 60 * 1000);
+      timeout.unref?.();
+      try {
+        await shell.openExternal(authUrl.toString());
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('Could not open your browser for Google sign-in.'));
+      }
+    });
+  });
 }
 
 function publishDiscordPresenceStatus(state, message, configured = Boolean(discordClientId)) {
@@ -998,6 +1071,10 @@ app.whenReady().then(() => {
   ipcMain.handle('app-update:get-state', (event) => {
     assertTrustedRenderer(event);
     return appUpdateState;
+  });
+  ipcMain.handle('auth:google-start', async (event, clientId) => {
+    assertTrustedRenderer(event);
+    return startGoogleOAuth(clientId);
   });
   ipcMain.handle('app-update:check', async (event) => {
     assertTrustedRenderer(event);
