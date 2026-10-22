@@ -16,8 +16,8 @@ services:
         generateValue: true
       - key: BACOIN_ADMIN_KEY
         generateValue: true
-      - key: BREVO_API_KEY
+      - key: SUPABASE_URL
         sync: false
-      - key: BACOIN_EMAIL_FROM
+      - key: SUPABASE_ANON_KEY
         sync: false
 

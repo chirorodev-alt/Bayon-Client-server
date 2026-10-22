@@ -45,15 +45,38 @@ export function getGoogleClientId() {
   return request<{ clientId: string | null }>('/api/auth/google/config', {}, false).then((result) => result.clientId);
 }
 
-export function requestEmailSignInCode(email: string, profileId: string, profileUsername: string) {
-  return request<{ success: boolean; message: string }>('/api/auth/email/request', {
-    method: 'POST', body: JSON.stringify({ email, offlineProfileId: profileId, offlineUsername: profileUsername }),
-  }, false);
+type SupabaseAuthConfig = { configured: boolean; url: string | null; anonKey: string | null };
+
+async function getSupabaseAuthConfig() {
+  const config = await request<SupabaseAuthConfig>('/api/auth/supabase/config', {}, false);
+  if (!config.configured || !config.url || !config.anonKey) {
+    throw new Error('Supabase Auth is not configured on the Bayon server yet.');
+  }
+  return { url: config.url, anonKey: config.anonKey };
+}
+
+async function supabaseAuthRequest<T>(path: string, email: string, body: Record<string, unknown>) {
+  const config = await getSupabaseAuthConfig();
+  const response = await fetch(`${config.url}/auth/v1/${path}`, {
+    method: 'POST',
+    headers: { apikey: config.anonKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ email, ...body }),
+  });
+  const result = await response.json().catch(() => ({})) as { message?: string; msg?: string; error_description?: string; error?: string } & T;
+  if (!response.ok) throw new Error(result.message || result.msg || result.error_description || result.error || `Supabase request failed (${response.status}).`);
+  return { config, result };
+}
+
+export async function requestEmailSignInCode(email: string) {
+  await supabaseAuthRequest('/otp', email.trim().toLowerCase(), { create_user: true });
+  return { success: true, message: 'Check your inbox for the Supabase verification code.' };
 }
 
 export async function verifyEmailSignInCode(email: string, code: string, profileId: string, profileUsername: string) {
-  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/email/verify', {
-    method: 'POST', body: JSON.stringify({ email, code, offlineProfileId: profileId, offlineUsername: profileUsername }),
+  const { result: session } = await supabaseAuthRequest<{ access_token?: string; user?: { email?: string } }>('/verify', email.trim().toLowerCase(), { token: code.trim(), type: 'email' });
+  if (!session.access_token) throw new Error('Supabase verified the code but did not return a sign-in session.');
+  const result = await request<{ token: string; user: BacoinsUser }>('/api/auth/supabase/link', {
+    method: 'POST', body: JSON.stringify({ supabaseAccessToken: session.access_token, offlineProfileId: profileId, offlineUsername: profileUsername }),
   }, false);
   localStorage.setItem(TOKEN_KEY, result.token);
   saveBacoinsIdentity(result.user);

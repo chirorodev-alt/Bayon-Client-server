@@ -246,8 +246,8 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
     if (!activeAccount) { setEmailError('Select an offline Minecraft profile first.'); return; }
     setEmailBusy(true); setEmailError(''); setEmailNotice('');
     try {
-      const result = await requestEmailSignInCode(email, activeAccount.id, activeAccount.username);
-      setCodeSent(true); setEmailNotice(result.message || 'Check your inbox for the six-digit verification code.');
+      const result = await requestEmailSignInCode(email);
+      setCodeSent(true); setEmailNotice(result.message || 'Check your inbox for the verification code.');
     } catch (cause) { setEmailError(cause instanceof Error ? cause.message : 'Could not send the email code.'); }
     finally { setEmailBusy(false); }
   };
@@ -299,13 +299,13 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
               <span>Verify your email to link {activeAccount?.username ?? 'your offline profile'} and use Bacoins.</span>
               <label>Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={emailBusy || codeSent} /></label>
               {!codeSent ? <button type="button" onClick={() => void requestEmailCode()} disabled={emailBusy || !activeAccount}>{emailBusy ? 'Sending code…' : 'Send verification code'}</button> : <form onSubmit={(event) => void verifyEmailCode(event)}>
-                <label>Six-digit code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" required /></label>
-                <button type="submit" disabled={emailBusy || verificationCode.length !== 6}>{emailBusy ? 'Verifying…' : 'Verify and link'}</button>
+                <label>Email verification code<input inputMode="numeric" autoComplete="one-time-code" maxLength={8} pattern="[0-9]{6,8}" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="Enter code" required /></label>
+                <button type="submit" disabled={emailBusy || verificationCode.length < 6 || verificationCode.length > 8}>{emailBusy ? 'Verifying…' : 'Verify and link'}</button>
                 <button type="button" onClick={() => { setCodeSent(false); setVerificationCode(''); setEmailNotice(''); }}>Use another email</button>
               </form>}
               {emailError && <span className="email-auth-error" role="alert">{emailError}</span>}
               {emailNotice && <span className="email-auth-notice" role="status">{emailNotice}</span>}
-              <small>Bayon sends a one-time code. It never asks for your email password.</small>
+              <small>Supabase sends a one-time code. Bayon never asks for your email password.</small>
             </>}
           </div>}
         </div>

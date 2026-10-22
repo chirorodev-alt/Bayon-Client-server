@@ -36,8 +36,6 @@ app.use(express.json());
 
 // Load in-memory DB state with file sync
 let db = loadDb();
-const emailLoginChallenges = new Map();
-const emailRequestTimes = new Map();
 
 // ── Root & Health ─────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -277,94 +275,63 @@ app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
 });
 
-app.post('/api/auth/email/request', async (req, res) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+app.get('/api/auth/supabase/config', (_req, res) => {
+  const url = process.env.SUPABASE_URL?.replace(/\/+$/, '') || '';
+  const anonKey = process.env.SUPABASE_ANON_KEY || '';
+  res.json({ configured: Boolean(url && anonKey), url: url || null, anonKey: anonKey || null });
+});
+
+app.post('/api/auth/supabase/link', async (req, res) => {
+  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  const accessToken = req.body?.supabaseAccessToken;
   const profileId = req.body?.offlineProfileId;
   const profileUsername = req.body?.offlineUsername;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (!supabaseUrl || !anonKey) return res.status(503).json({ error: 'Supabase Auth is not configured on the Bayon server yet.' });
+  if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 8192) return res.status(400).json({ error: 'Supabase sign-in did not return a valid session.' });
   if (typeof profileId !== 'string' || profileId.length < 8 || profileId.length > 100 || typeof profileUsername !== 'string' || !/^[A-Za-z0-9_]{3,16}$/.test(profileUsername)) {
     return res.status(400).json({ error: 'Create or select an offline Minecraft profile first.' });
   }
-  if (!process.env.BREVO_API_KEY || !process.env.BACOIN_EMAIL_FROM) {
-    return res.status(503).json({ error: 'Email sign-in is not configured on the Bayon server yet.' });
-  }
-  const now = Date.now();
-  const previousRequest = emailRequestTimes.get(email) || 0;
-  if (now - previousRequest < 60_000) return res.status(429).json({ error: 'Wait one minute before requesting another code.' });
 
-  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
-  const codeHash = crypto.createHmac('sha256', JWT_SECRET).update(`${email}:${code}`).digest('hex');
-  const configuredSender = process.env.BACOIN_EMAIL_FROM.trim();
-  const senderMatch = configuredSender.match(/^(.*?)\s*<([^<>]+)>$/);
-  const senderEmail = senderMatch ? senderMatch[2].trim() : configuredSender;
-  const senderName = senderMatch ? senderMatch[1].trim() : 'Bayon Client';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
-    return res.status(503).json({ error: 'The Bayon email sender address is not configured correctly.' });
+  let authResponse;
+  try {
+    authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+  } catch {
+    return res.status(502).json({ error: 'Bayon could not reach Supabase Auth. Check the Supabase project URL.' });
   }
-  const sendResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      sender: { name: senderName || 'Bayon Client', email: senderEmail },
-      to: [{ email }],
-      subject: 'Your Bayon Client sign-in code',
-      textContent: `Your Bayon Client verification code is ${code}. It expires in 10 minutes. If you did not request it, ignore this email.`,
-      htmlContent: `<p>Your Bayon Client verification code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>`,
-    }),
-  });
-  if (!sendResponse.ok) {
-    console.error('Email provider rejected a Bayon sign-in message:', await sendResponse.text());
-    return res.status(502).json({ error: 'Could not send the email code. Check the server email configuration.' });
-  }
-  emailRequestTimes.set(email, now);
-  emailLoginChallenges.set(email, { codeHash, expiresAt: now + 10 * 60_000, attempts: 0, profileId, profileUsername });
-  res.json({ success: true, message: 'If the email can receive mail, a verification code has been sent.' });
-});
+  if (!authResponse.ok) return res.status(401).json({ error: 'Supabase could not verify this session. Request a new email code and try again.' });
+  const identity = await authResponse.json();
+  const email = typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : '';
+  if (!email || !identity.email_confirmed_at) return res.status(403).json({ error: 'Verify this email in Supabase before connecting your profile.' });
 
-app.post('/api/auth/email/verify', async (req, res) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
-  const challenge = emailLoginChallenges.get(email);
-  if (!challenge || challenge.expiresAt <= Date.now()) {
-    emailLoginChallenges.delete(email);
-    return res.status(400).json({ error: 'That code is missing or expired. Request a new one.' });
-  }
-  if (challenge.profileId !== req.body?.offlineProfileId || challenge.profileUsername !== req.body?.offlineUsername) {
-    return res.status(400).json({ error: 'The selected Minecraft profile changed. Request a new code for this profile.' });
-  }
-  const submittedHash = crypto.createHmac('sha256', JWT_SECRET).update(`${email}:${code}`).digest('hex');
-  const expected = Buffer.from(challenge.codeHash, 'hex');
-  const actual = Buffer.from(submittedHash, 'hex');
-  if (!/^\d{6}$/.test(code) || actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
-    challenge.attempts += 1;
-    if (challenge.attempts >= 5) emailLoginChallenges.delete(email);
-    return res.status(400).json({ error: challenge.attempts >= 5 ? 'Too many wrong attempts. Request a new code.' : 'That verification code is incorrect.' });
-  }
-  emailLoginChallenges.delete(email);
   let user = db.users.find((candidate) => [candidate.email, candidate.googleEmail].some((value) => typeof value === 'string' && value.toLowerCase() === email));
+  let isNewUser = false;
   if (!user) {
     const base = `e_${crypto.createHash('sha256').update(email).digest('hex').slice(0, 10)}`;
     let username = base;
     let suffix = 1;
     while (db.users.some((candidate) => candidate.username.toLowerCase() === username.toLowerCase())) username = `${base.slice(0, 13)}${suffix++}`;
     user = {
-      id: `user-${crypto.randomUUID()}`, username, email, emailVerifiedAt: new Date().toISOString(), status: 'online',
+      id: `user-${crypto.randomUUID()}`, username, email, emailVerifiedAt: identity.email_confirmed_at, supabaseUserId: identity.id, status: 'online',
       avatarUrl: `https://mc-heads.net/avatar/${encodeURIComponent(username)}`, createdAt: new Date().toISOString(),
       bacoins: 0, ownedCosmetics: [], linkedOfflineProfiles: [],
     };
-    db.users.push(user);
-  } else {
-    user.email = email;
-    user.emailVerifiedAt ||= new Date().toISOString();
+    isNewUser = true;
   }
   try {
-    linkOfflineProfileToUser(user, challenge.profileId, challenge.profileUsername);
+    linkOfflineProfileToUser(user, profileId, profileUsername);
   } catch (err) {
     return res.status(err.statusCode || 409).json({ error: err.message || 'Could not connect this offline profile.' });
   }
+  user.email = email;
+  user.emailVerifiedAt ||= identity.email_confirmed_at;
+  user.supabaseUserId = identity.id;
   user.bacoins = Number.isSafeInteger(user.bacoins) && user.bacoins >= 0 ? user.bacoins : 0;
   user.ownedCosmetics = Array.isArray(user.ownedCosmetics) ? user.ownedCosmetics : [];
   user.status = 'online';
+  if (isNewUser) db.users.push(user);
   saveDb(db);
   const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ success: true, token, user: publicBayonUser(user) });

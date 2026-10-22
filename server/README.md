@@ -48,14 +48,20 @@ If you prefer creating a Web Service manually:
 
 ## Bacoins and redeem codes
 
-To connect an offline Minecraft profile, select it in **Accounts**, open the **Minecraft / Java Edition** dropdown in the title bar, enter an email address, and request a verification code. Enter the six-digit code from that inbox to link the verified address to the selected profile. The Store contains no account password form; Bayon never asks for an email password or reads inbox contents. A code is single-use, expires after 10 minutes, and can be requested again after one minute. Each offline profile can be linked to one Bayon account, and Bacoins and cosmetic purchases stay with that Bayon account.
+To connect an offline Minecraft profile, select it in **Accounts**, open the **Sign in Email** dropdown in the title bar, enter an email address, and request a verification code. Supabase Auth sends and verifies the OTP; Bayon's backend validates the resulting Supabase session before linking the selected profile. Bacoins balances and cosmetic purchases remain stored on the Bayon backend.
 
-Email sign-in uses [Brevo's transactional email API](https://developers.brevo.com/reference/send-transac-email). Configure these variables in the backend service environment (for example, Render) and register/verify the sender address or domain in Brevo:
+### Supabase setup
 
-- `BREVO_API_KEY`: Brevo API key. Keep it on the server; never put it in the launcher or commit it to source control.
-- `BACOIN_EMAIL_FROM`: verified sender, for example `Bayon Client <login@your-verified-domain.com>`.
+1. Create a Supabase project and enable email authentication.
+2. In **Authentication → SMTP Settings**, configure Brevo as the custom SMTP provider using the SMTP host, port, username, and SMTP key shown in your Brevo SMTP settings. Use Brevo's SMTP credentials here; the Brevo REST API key is not an SMTP password. Supabase's default mail service is restricted to project team addresses and is intended for testing; use custom SMTP for real users. See [Supabase custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp).
+3. In **Authentication → Email Templates**, set the sign-in template to include `{{ .Token }}` so it delivers an OTP that users can type into the client. The client accepts the configured 6–8 digit code. See [Supabase email templates](https://supabase.com/docs/guides/auth/auth-email-templates).
+4. Set these values in the backend environment (for example, Render):
+   - `SUPABASE_URL`: Project URL, such as `https://<project-ref>.supabase.co`.
+   - `SUPABASE_ANON_KEY`: Supabase anon/publishable key. Never use the `service_role` key here.
 
-Until both are configured on the deployed backend, requesting a code returns an email-not-configured error. Google OAuth endpoints remain available as an optional alternative, but the app's Bacoins sign-in uses the email code flow.
+The launcher reads the project URL and public anon key from the Bayon backend config endpoint. Keep the Supabase service-role key private and do not put it in the client. Without both settings, email sign-in reports that Supabase is not configured.
+
+Google OAuth endpoints remain available as an optional alternative. The app's Bacoins sign-in uses Supabase email OTP.
 The Store currently accepts redeem codes and sells the configured cosmetics. Payment processing is not enabled.
 
 Create codes from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
