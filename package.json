@@ -14,6 +14,7 @@
     "build:fabric-mod": "node scripts/build-fabric-mod.mjs",
     "dist": "npm run build:fabric-mod && npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --win --dir",
+    "generate:bootstrap-manifest": "node scripts/generate-bootstrap-manifest.mjs",
     "test": "vitest run",
     "lint": "oxlint .",
     "preview": "vite preview",
