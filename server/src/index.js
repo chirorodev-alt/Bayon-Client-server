@@ -70,7 +70,9 @@ app.get('/api/client-presence', (_req, res) => {
 });
 
 app.get('/api/client-notifications', (_req, res) => {
-  const notifications = (db.clientNotifications || []).slice(-30).reverse();
+  const requestedLimit = typeof _req.query.limit === 'string' ? Number(_req.query.limit) : NaN;
+  const limit = Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 100 ? requestedLimit : 30;
+  const notifications = (db.clientNotifications || []).slice(-limit).reverse();
   res.setHeader('Cache-Control', 'no-store');
   res.json({ notifications });
 });

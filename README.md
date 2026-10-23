@@ -57,7 +57,7 @@ The Friends panel requests `GET {VITE_API_BASE_URL}/api/friends` and includes sa
 
 `status` must be `online`, `offline`, or `in_game`; `avatarUrl` is optional. The UI displays a connection/response error rather than sample entries if the API is unavailable or returns an invalid response. For cookie authentication, configure the local API to allow credentialed requests from the Vite/Electron origin. Configure the hosted API base URL through the build environment when deploying.
 
-Partner servers on the Home page come from the backend directory and show live server status. Administrators can add, edit, and remove partner listings from the private admin panel. Latest News is populated by admin-published client notifications; new posts also appear in the client's notification center.
+Partner servers on the Home page come from the backend directory and show live server status. Administrators can add, edit, and remove partner listings from the private admin panel. Latest News is populated by admin-published posts; View All opens a dedicated page with the full published history, and new posts also appear in the client's notification center.
 
 Use the feedback button in the client title bar to send a bug report or positive feedback to the Bayon team. You may attach one PNG, JPEG, or WebP screenshot up to 3 MB. Feedback is visible only in the authenticated admin panel's Feedback inbox.
 

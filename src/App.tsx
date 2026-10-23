@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { lazy, Suspense } from 'react';
 import {
+  ArrowLeft,
   Bell,
   Check,
   AlertTriangle,
@@ -274,6 +275,7 @@ function AppShell() {
               <Routes>
                 <Route path="/" element={<Navigate to="/home" replace />} />
                 <Route path="/home" element={<HomePage />} />
+                <Route path="/news" element={<NewsPage />} />
                 <Route path="/play" element={<PlayPage />} />
                 <Route path="/mods" element={<ModsPage />} />
                 <Route path="/skins" element={<SkinsPage />} />
@@ -591,38 +593,12 @@ function HomePage() {
   const [launchProgress, setLaunchProgress] = useState(0);
   const [launchStatus, setLaunchStatus] = useState('Ready');
   const [launching, setLaunching] = useState(false);
-  const [showAllNews, setShowAllNews] = useState(false);
-  const [clientNews, setClientNews] = useState<ClientNotification[]>([]);
-  const [newsLoading, setNewsLoading] = useState(true);
-  const [newsError, setNewsError] = useState<string | null>(null);
+  const { clientNews, newsLoading, newsError, refreshNews } = useClientNews(2);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendSearchInput, setFriendSearchInput] = useState('');
   const [friendAdding, setFriendAdding] = useState(false);
   const [friendAddError, setFriendAddError] = useState<string | null>(null);
   const settings = useSettingsStore();
-
-  const refreshNews = useCallback(async () => {
-    try {
-      const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`News service returned HTTP ${response.status}.`);
-      const result = await response.json() as { notifications?: ClientNotification[] };
-      const items = Array.isArray(result.notifications) ? result.notifications.filter((item) =>
-        item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.message === 'string' && typeof item.createdAt === 'string',
-      ) : [];
-      setClientNews(items);
-      setNewsError(null);
-    } catch (cause) {
-      setNewsError(cause instanceof Error ? cause.message : 'Could not load the latest news.');
-    } finally {
-      setNewsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void Promise.resolve().then(refreshNews);
-    const interval = window.setInterval(() => void refreshNews(), 30_000);
-    return () => window.clearInterval(interval);
-  }, [refreshNews]);
 
   const handleAddFriendSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -739,9 +715,9 @@ function HomePage() {
         </div>
 
         <section className="news-section">
-          <div className="section-heading"><h2><span className="news-icon"><Bell className="h-3 w-3" /></span> Latest News</h2><button type="button" onClick={() => setShowAllNews((current) => !current)}>{showAllNews ? 'Show Less' : 'View All'} <ChevronRight className="h-3.5 w-3.5" /></button></div>
+          <div className="section-heading"><h2><span className="news-icon"><Bell className="h-3 w-3" /></span> Latest News</h2><button type="button" onClick={() => navigate('/news')}>View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
           <div className="news-grid">
-            {clientNews.slice(0, showAllNews ? 6 : 2).map((item, index) => (
+            {clientNews.slice(0, 2).map((item, index) => (
               <article className={`news-card ${index % 2 === 0 ? 'news-world' : 'news-void'}`} key={item.id}>
                 <div className="news-art"><span>{item.level === 'warning' ? 'IMPORTANT' : item.level === 'success' ? 'UPDATE' : 'NEWS'}</span></div>
                 <div className="news-copy"><h3>{item.title}</h3><p>{item.message}</p><footer><span>{new Date(item.createdAt).toLocaleDateString()}</span><i /> <span>Bayon Client</span></footer></div>
@@ -893,6 +869,76 @@ function HomePage() {
           )}
         </section>
       </aside>
+    </motion.div>
+  );
+}
+
+function useClientNews(limit: number) {
+  const [clientNews, setClientNews] = useState<ClientNotification[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [newsError, setNewsError] = useState<string | null>(null);
+
+  const refreshNews = useCallback(async () => {
+    try {
+      const response = await fetch(`${BACKEND_BASE_URL}/api/client-notifications?limit=${limit}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`News service returned HTTP ${response.status}.`);
+      const result = await response.json() as { notifications?: ClientNotification[] };
+      const items = Array.isArray(result.notifications) ? result.notifications.filter((item) =>
+        item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.message === 'string' && typeof item.createdAt === 'string',
+      ) : [];
+      setClientNews(items);
+      setNewsError(null);
+    } catch (cause) {
+      setNewsError(cause instanceof Error ? cause.message : 'Could not load the latest news.');
+    } finally {
+      setNewsLoading(false);
+    }
+  }, [limit]);
+
+  useEffect(() => {
+    void refreshNews();
+    const interval = window.setInterval(() => void refreshNews(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshNews]);
+
+  return { clientNews, newsLoading, newsError, refreshNews };
+}
+
+function NewsPage() {
+  const navigate = useNavigate();
+  const { clientNews, newsLoading, newsError, refreshNews } = useClientNews(100);
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="news-page h-full overflow-y-auto p-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => navigate('/home')} aria-label="Back to home" className="rounded-xl border border-white/10 bg-white/5 p-2 text-white/75 transition hover:bg-white/10">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <PageHeader title="Latest News" subtitle="Updates and announcements from Bayon Client." />
+        </div>
+        <button type="button" onClick={() => void refreshNews()} disabled={newsLoading} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75 transition hover:bg-white/10 disabled:opacity-50">
+          <RefreshCw className={`h-4 w-4 ${newsLoading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+      {newsError && <div className="mb-4 rounded-xl border border-red-400/20 bg-red-400/5 p-4 text-sm text-red-200" role="alert">
+        <p>{newsError}</p>
+        <button type="button" onClick={() => void refreshNews()} className="mt-2 underline underline-offset-4">Try again</button>
+      </div>}
+      {newsLoading && clientNews.length === 0 ? (
+        <p className="rounded-xl border border-white/10 bg-white/[0.03] p-6 text-sm text-white/50" role="status">Loading the latest news…</p>
+      ) : clientNews.length > 0 ? (
+        <div className="news-page-grid">
+          {clientNews.map((item, index) => (
+            <article className={`news-card news-page-card ${index % 2 === 0 ? 'news-world' : 'news-void'}`} key={item.id}>
+              <div className="news-art"><span>{item.level === 'warning' ? 'IMPORTANT' : item.level === 'success' ? 'UPDATE' : 'NEWS'}</span></div>
+              <div className="news-copy"><h3>{item.title}</h3><p>{item.message}</p><footer><span>{new Date(item.createdAt).toLocaleDateString()}</span><i /> <span>Bayon Client</span></footer></div>
+            </article>
+          ))}
+        </div>
+      ) : !newsError ? (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6 text-sm text-white/50" role="status">No news has been published yet. Check back for updates from Bayon.</div>
+      ) : null}
     </motion.div>
   );
 }

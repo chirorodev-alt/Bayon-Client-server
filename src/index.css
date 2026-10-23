@@ -3338,6 +3338,39 @@ input[type='range'] {
   background: #8290a0;
 }
 
+.news-page {
+  scrollbar-gutter: stable;
+}
+
+.news-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.news-page-card .news-art {
+  height: clamp(140px, 20vw, 210px);
+}
+
+.news-page-card .news-copy {
+  padding: 16px;
+}
+
+.news-page-card .news-copy h3 {
+  font-size: 15px;
+}
+
+.news-page-card .news-copy p {
+  min-height: 0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.news-page-card .news-copy footer {
+  font-size: 11px;
+}
+
 .dashboard-rail {
   display: flex;
   min-width: 0;
