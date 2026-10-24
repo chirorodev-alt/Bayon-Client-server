@@ -396,7 +396,7 @@ app.get('/api/auth/google/config', (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || null });
 });
 app.get('/api/auth/microsoft/config', (_req, res) => {
-  res.json({ clientId: process.env.MICROSOFT_CLIENT_ID || null });
+  res.json({ clientId: process.env.MICROSOFT_CLIENT_ID || 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb' });
 });
 
 async function verifyGoogleCredential(credential) {
@@ -506,7 +506,7 @@ app.post('/api/auth/google/exchange', async (req, res) => {
 });
 
 app.post('/api/auth/microsoft/exchange', async (req, res) => {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientId = process.env.MICROSOFT_CLIENT_ID || 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb';
   const { code, codeVerifier, redirectUri, offlineProfileId, offlineUsername } = req.body || {};
   if (!clientId) return res.status(503).json({ error: 'Microsoft sign-in is not configured on the Bayon server.' });
   if (typeof code !== 'string' || code.length > 4096 || typeof codeVerifier !== 'string'
@@ -649,7 +649,7 @@ app.post('/api/store/redeem', authenticatedUser, (req, res) => {
 });
 
 app.post('/api/store/auth/microsoft', async (req, res) => {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientId = process.env.MICROSOFT_CLIENT_ID || 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb';
   const { code, codeVerifier, redirectUri } = req.body || {};
   if (!clientId) return res.status(503).json({ error: 'Microsoft sign-in is not configured on the Bayon server.' });
   if (typeof code !== 'string' || code.length > 4096 || typeof codeVerifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier) || typeof redirectUri !== 'string') return res.status(400).json({ error: 'Microsoft sign-in did not return a valid authorization response.' });

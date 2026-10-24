@@ -80,7 +80,9 @@ Use **Skins → Upload skin** to select a PNG skin image (64 × 64, or legacy 64
 
 ## Accounts
 
-Use **Accounts → Create offline account** to make a local profile with a 3–16 character Minecraft-style username. Profiles are stored in local browser storage and can be selected or removed. This is not Microsoft authentication, does not verify ownership, and cannot authenticate to online Minecraft services. Microsoft sign-in remains unavailable until a secure OAuth flow is implemented.
+Use **Accounts → Create offline account** to make a local profile with a 3–16 character Minecraft-style username. Profiles are stored in local browser storage and can be selected or removed. An offline profile does not verify Microsoft ownership or authenticate to online Minecraft services.
+
+Use **Accounts → Microsoft Minecraft account** to authenticate with Microsoft for Minecraft Java ownership and online servers. To sync Bacoins, use **Connect Bayon account** and sign in with the same Microsoft identity used on the website. Authentication opens Microsoft's sign-in page in your browser; if Microsoft asks for a verification code, enter it there. Bayon does not request or store Microsoft passwords or verification codes. The backend must have `MICROSOFT_CLIENT_ID` configured for sign-in to work.
 
 ## Mod catalogs & installation
 

@@ -1,51 +1,98 @@
 # Bayon Client Fabric mod
 
-This is a client-only Fabric mod for Minecraft Java Edition **26.2**. Its JAR contains the Bayon main menu, configurable HUD, the pixel-art Bayon cape, and the Fabric API dependency in a nested JAR. The launcher installs it only into the selected Bayon profile.
+Bayon Client is a client-only Fabric mod for Minecraft Java Edition **26.2**. It replaces the vanilla title screen with a responsive Bayon menu, while keeping the normal Singleplayer, Multiplayer, and Options screens reachable. It also includes the existing configurable HUD and cosmetic controls.
 
-## Build requirements
+## Project structure
 
-- Java 25 or newer
-- Windows: PowerShell or Command Prompt; macOS/Linux: a POSIX shell
-- Internet access for the first Gradle dependency download
+```text
+fabric-mod/
+├── build.gradle
+├── gradle.properties
+├── settings.gradle
+└── src/
+    ├── main/resources/fabric.mod.json
+    └── client/
+        ├── java/com/bayon/client/
+        │   ├── BayonClient.java
+        │   ├── config/                 # Bayon title and HUD settings
+        │   ├── hud/                    # Title screen, HUD, and feature screens
+        │   ├── mixin/                  # Client loading-logo replacement
+        │   ├── cape/                   # Existing client cape renderer
+        │   └── ui/                     # Theme, buttons, animations, and rendering
+        └── resources/
+            ├── bayonclient.client.mixins.json
+            └── assets/bayonclient/
+                ├── lang/en_us.json
+                └── textures/gui/       # Bayon artwork and icons
+```
 
-## Build
+## Build and run
 
-From this directory, run:
+Requirements: **JDK 25**, Windows PowerShell or Command Prompt (or a POSIX shell), and internet access for the initial Gradle dependency download.
+
+From this directory, run the development client:
 
 ```powershell
-.\gradlew.bat build
+.\gradlew.bat runClient
 ```
 
 On macOS/Linux:
 
 ```sh
-./gradlew build
+./gradlew runClient
 ```
 
-The distributable JAR is `build/libs/bayonclient-0.1.0.jar`.
-
-To build the launcher-ready copy and its version manifest, run:
+Build the distributable mod:
 
 ```powershell
-.\gradlew.bat prepareLauncherBundle
+.\gradlew.bat build
 ```
 
-This writes `dist/bayonclient.jar` and `dist/bayonclient.json`. `npm run dist` at the repository root runs this task before packaging the launcher.
+The built JAR is written to `build/libs/`. To prepare the launcher's install bundle and version manifest, run `.\gradlew.bat prepareLauncherBundle`; the output is `dist/bayonclient.jar` and `dist/bayonclient.json`.
 
-## In-game controls and HUD editor
+## Menu and settings
 
-The Bayon title screen replaces the vanilla start menu. Singleplayer, Multiplayer, Options, and Quit use Minecraft's normal screens/actions. Wardrobe opens the cape control, Cosmetic Store lists the included cape, and Store opens the Bayon web store.
+- The Bayon menu uses the generated `background.png`, your Bayon logo, and enlarged original line-art UI icons. The same logo replaces Mojang Studios on Minecraft's startup progress screen. The `nightfall` alternate background is selectable in config.
+- The compact, centered menu follows a minimalist client layout: Singleplayer and Multiplayer are the primary actions; Options is the top-right sliders icon. Quit and the close control show a confirmation screen. Minimize uses GLFW.
+- Wardrobe, Cosmetic Store, Store, and Profile open themed placeholder screens.
+- Standard Minecraft widget focus keeps mouse, keyboard, and gamepad navigation available.
+- The menu uses square-cornered, translucent glass panels, a custom pixel bitmap font, full-resolution Bayon icons, and a black, white, and gray control palette. The startup progress screen uses the Bayon landscape and displays the full-color Bayon logo; the game window title is `Bayon Client 26.2`.
+- Bayon title settings are stored at `config/bayonclient.json`:
 
-Press **Right Shift** to open the Bayon customization screen. Change HUD module visibility, filter modules by category, and use the preview panel. HUD Layout lets you drag a visible widget to move it and scroll over it to resize it. Appearance changes theme and background. The editor key can be rebound from Minecraft's Controls menu under Bayon Client.
+```json
+{
+  "customTitleScreen": true,
+  "animations": true,
+  "background": "bayon"
+}
+```
 
-The modules are FPS, keystrokes, left/right CPS, coordinates, ping when connected, direction, armor, and potion effects. CPS counts mouse press edges in a rolling one-second window, so holding a button does not add clicks. The Bayon cape uses the included monochrome and gold pixel texture and can be toggled in the editor. HUD settings are stored in `config/bayonclient-hud.json` in the active game's directory.
+`background` accepts `bayon` or `nightfall`. The file is generated on first launch; edit it while Minecraft is closed. HUD settings remain in `config/bayonclient-hud.json`.
 
-## Launcher install
+## Artwork and icon assets
 
-1. Build the mod with `npm run build:fabric-mod` from the repository root.
-2. Create/select a Fabric profile for Minecraft 26.2.
-3. Open the launcher's Mods page and choose **Install Bayon mod**.
+The menu icons and backgrounds are original Bayon artwork; the logo files use the Bayon logo supplied by the user:
 
-Bayon Client stores the mod in `%APPDATA%\\.bayonclient\\profiles\\<profile-id>\\mods` (or the selected custom game-data root). Each profile has its own mods folder. The launcher records the installed filename, version, and SHA-256 hash beside that profile. Updates replace only a Bayon JAR whose hash still matches the launcher's record; unexpected or externally changed files are left intact.
+| Path | Size | Use |
+| --- | ---: | --- |
+| `textures/gui/background.png` | 1920 × 1080 | Main fantasy sunset background |
+| `textures/gui/background_nightfall.png` | 1920 × 1080 | Alternate night background |
+| `textures/gui/logo.png` | 768 × 768 | Center title-screen branding |
+| `textures/gui/icons/{play,globe,door,user,minimize,close,options,shirt,bag,crown}.png` | 64 × 64 each | Main actions, window controls, and bottom navigation |
+| `font/bayon_pixel.json` + `textures/font/bayon_pixel.png` | 128 × 48 glyph atlas | Original 5 × 7 pixel glyphs in 8 × 8 cells |
 
-The mod has been compiled for Minecraft 26.2 only. A separate compatible build is required for each other Minecraft version; the launcher prevents installing this build into profiles with another version.
+The generated PNGs are committed under `src/client/resources/assets/bayonclient/textures/gui/`; no extra image downloads are required.
+
+## Extending the UI
+
+- Add screens under `com.bayon.client.hud` and use `BayonPlaceholderScreen` as the themed starting point.
+- Add colors, corner radii, and UI sizing constants to `BayonTheme`; `ThemeManager` continues to manage the existing HUD appearance themes.
+- Add icon PNGs under `textures/gui/icons/`, then reference their resource name from `BayonButton` or `BayonTabButton`.
+- Add user-facing text to `assets/bayonclient/lang/en_us.json` and use translation components for new controls.
+- Add cosmetic entries/screens alongside the existing wardrobe and cosmetic placeholder destinations.
+
+## Existing HUD and launcher integration
+
+Press **Right Shift** in-game to open the Bayon customization screen. The compact Modules page groups HUD widgets by category and provides per-module enable switches, configurable toggle keys, and scale settings. While setting a module key, press a keyboard key to assign it, or press **Escape**/**Backspace** to clear it. The HUD includes FPS, a keycap-style WASD/Space/mouse display, CPS, coordinates, ping, direction, armor, and potion effects. The HUD editor also manages widget layout, themes, background colors, and the bundled cape.
+
+The launcher installs this mod only into the selected Bayon profile. Build the launcher bundle with `npm run build:fabric-mod` from the repository root.

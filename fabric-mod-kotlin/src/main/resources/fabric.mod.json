@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "bayonclientkotlin",
+  "version": "${version}",
+  "name": "Bayon Client",
+  "description": "A Kotlin-based client-only Bayon menu for Minecraft.",
+  "authors": ["Bayon Client"],
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "com.bayon.clientkotlin.BayonClient"
+      }
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "${minecraft_version}",
+    "java": ">=25",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=1.14.2"
+  }
+}

@@ -60,12 +60,13 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'bayon-client-settings',
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
-        const persisted = persistedState as Partial<SettingsState>;
+        let persisted = persistedState as Partial<SettingsState>;
         if (version < 2 && persisted.javaPath === 'C:/Program Files/Java/jre-21/bin/java.exe') {
-          return { ...persisted, javaPath: '' };
+          persisted = { ...persisted, javaPath: '' };
         }
+        if (version < 3) persisted = { ...persisted, minimizeToTray: false };
         return persisted;
       },
     },

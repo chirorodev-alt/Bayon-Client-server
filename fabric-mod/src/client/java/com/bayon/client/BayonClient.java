@@ -1,6 +1,7 @@
 package com.bayon.client;
 
 import com.bayon.client.config.HudConfig;
+import com.bayon.client.config.BayonConfig;
 import com.bayon.client.hud.BayonHud;
 import com.bayon.client.hud.BayonCustomizationScreen;
 import com.bayon.client.hud.BayonMainMenuScreen;
@@ -16,6 +17,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.ModelLayerRegistry;
 import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.client.model.player.PlayerCapeModel;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.SharedConstants;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
@@ -25,9 +27,11 @@ public final class BayonClient implements ClientModInitializer {
             Identifier.fromNamespaceAndPath(MOD_ID, "hud")
     );
     private static KeyMapping openEditor;
+    private static boolean windowTitleInitialized;
 
     @Override
     public void onInitializeClient() {
+        BayonConfig.load();
         HudConfig.load();
         BayonHud.initialize();
         ModelLayerRegistry.registerModelLayer(BayonCapeLayer.MODEL_LAYER, PlayerCapeModel::createCapeLayer);
@@ -48,7 +52,12 @@ public final class BayonClient implements ClientModInitializer {
                 BayonHud::render
         );
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.gui.screen() instanceof net.minecraft.client.gui.screens.TitleScreen
+            if (!windowTitleInitialized) {
+                client.getWindow().setTitle("Bayon Client " + SharedConstants.getCurrentVersion().name());
+                windowTitleInitialized = true;
+            }
+            if (BayonConfig.customTitleScreenEnabled()
+                    && client.gui.screen() instanceof net.minecraft.client.gui.screens.TitleScreen
                     && !(client.gui.screen() instanceof BayonMainMenuScreen)) {
                 client.gui.setScreen(new BayonMainMenuScreen());
                 return;
@@ -58,6 +67,7 @@ public final class BayonClient implements ClientModInitializer {
                     client.gui.setScreen(new BayonCustomizationScreen(client.gui.screen()));
                 }
             }
+            BayonCustomizationScreen.tickKeybinds(client);
             BayonHud.tick(client);
         });
     }

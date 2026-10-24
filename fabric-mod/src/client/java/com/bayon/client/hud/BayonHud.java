@@ -71,6 +71,10 @@ public final class BayonHud {
 
     private static void drawWidget(GuiGraphicsExtractor graphics, Minecraft client, String id, Widget widget, boolean preview) {
         float scale = widget.scale;
+        if (id.equals("keystrokes")) {
+            drawKeystrokes(graphics, client, widget, preview);
+            return;
+        }
         List<String> lines = lines(client, id, preview);
         if (lines.isEmpty()) return;
         int contentWidth = 0;
@@ -86,6 +90,41 @@ public final class BayonHud {
             graphics.text(client.font, Component.literal(lines.get(i)), 6, 4 + i * 11, i == 0 ? TEXT : MUTED, true);
         }
         graphics.pose().popMatrix();
+    }
+
+    private static void drawKeystrokes(GuiGraphicsExtractor graphics, Minecraft client, Widget widget, boolean preview) {
+        int panelWidth = 112;
+        int panelHeight = 78;
+        graphics.pose().pushMatrix();
+        graphics.pose().translate(widget.x, widget.y);
+        graphics.pose().scale(widget.scale, widget.scale);
+        com.bayon.client.ui.BayonUi.roundedRect(graphics, 0, 0, panelWidth, panelHeight, 4, HudConfig.panelColor());
+        graphics.outline(0, 0, panelWidth, panelHeight, HudConfig.borderColor());
+        graphics.text(client.font, Component.literal("KEYSTROKES"), 7, 5, MUTED, true);
+
+        drawKeyCap(graphics, client, 45, 18, 22, 17, "W",
+                preview || client.options.keyUp.isDown());
+        drawKeyCap(graphics, client, 20, 38, 22, 17, "A", client.options.keyLeft.isDown());
+        drawKeyCap(graphics, client, 45, 38, 22, 17, "S",
+                client.options.keyDown.isDown());
+        drawKeyCap(graphics, client, 70, 38, 22, 17, "D",
+                preview || client.options.keyRight.isDown());
+        drawKeyCap(graphics, client, 7, 59, 40, 14, "SPACE",
+                client.options.keyJump.isDown());
+        drawKeyCap(graphics, client, 50, 59, 25, 14, "LMB", preview || previousLeft);
+        drawKeyCap(graphics, client, 78, 59, 27, 14, "RMB", previousRight);
+        graphics.pose().popMatrix();
+    }
+
+    private static void drawKeyCap(GuiGraphicsExtractor graphics, Minecraft client, int x, int y, int width,
+                                   int height, String label, boolean pressed) {
+        int fill = pressed ? 0xFF454545 : 0xCC111111;
+        int border = pressed ? HudConfig.accentColor() : HudConfig.borderColor();
+        int text = pressed ? 0xFFFFFFFF : MUTED;
+        com.bayon.client.ui.BayonUi.roundedRect(graphics, x, y, x + width, y + height, 2, fill);
+        com.bayon.client.ui.BayonUi.outlineRect(graphics, x, y, x + width, y + height, border);
+        graphics.centeredText(client.font, Component.literal(label), x + width / 2,
+                y + Math.max(0, (height - client.font.lineHeight) / 2), text);
     }
 
     private static List<String> lines(Minecraft client, String id, boolean preview) {
@@ -234,7 +273,10 @@ public final class BayonHud {
             double y = event.y();
             for (Map.Entry<String, Widget> entry : HudConfig.widgets().entrySet()) {
                 Widget widget = entry.getValue();
-                if (x >= widget.x && x <= widget.x + 120 * widget.scale && y >= widget.y && y <= widget.y + 45 * widget.scale) {
+                int widgetWidth = entry.getKey().equals("keystrokes") ? 112 : 150;
+                int widgetHeight = entry.getKey().equals("keystrokes") ? 78 : 48;
+                if (x >= widget.x && x <= widget.x + widgetWidth * widget.scale
+                        && y >= widget.y && y <= widget.y + widgetHeight * widget.scale) {
                     dragging = entry.getKey();
                     lastMouseX = x;
                     lastMouseY = y;
@@ -270,7 +312,10 @@ public final class BayonHud {
         public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
             for (Map.Entry<String, Widget> entry : HudConfig.widgets().entrySet()) {
                 Widget widget = entry.getValue();
-                if (mouseX >= widget.x && mouseX <= widget.x + 150 * widget.scale && mouseY >= widget.y && mouseY <= widget.y + 45 * widget.scale) {
+                int widgetWidth = entry.getKey().equals("keystrokes") ? 112 : 150;
+                int widgetHeight = entry.getKey().equals("keystrokes") ? 78 : 48;
+                if (mouseX >= widget.x && mouseX <= widget.x + widgetWidth * widget.scale
+                        && mouseY >= widget.y && mouseY <= widget.y + widgetHeight * widget.scale) {
                     widget.scale = Math.max(0.5f, Math.min(2.0f, widget.scale + (scrollY > 0 ? 0.1f : -0.1f)));
                     HudConfig.save();
                     return true;

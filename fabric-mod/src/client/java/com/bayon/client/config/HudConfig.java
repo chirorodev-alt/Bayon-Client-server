@@ -9,24 +9,29 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.lwjgl.glfw.GLFW;
 import com.bayon.client.ui.ThemeManager;
 
 public final class HudConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("bayonclient-hud.json");
-    private static final Map<String, Widget> DEFAULTS = Map.of(
-            "fps", new Widget(true, 8, 8, 1.0f),
-            "keystrokes", new Widget(true, 8, 34, 1.0f),
-            "cps", new Widget(true, 8, 105, 1.0f),
-            "coordinates", new Widget(true, 8, 128, 1.0f),
-            "ping", new Widget(true, 8, 151, 1.0f),
-            "direction", new Widget(true, 8, 174, 1.0f),
-            "armor", new Widget(true, 8, 197, 1.0f),
-            "effects", new Widget(true, 8, 220, 1.0f)
-    );
+    private static final Map<String, Widget> DEFAULTS = defaultsMap();
     private static Data data = defaults();
 
     private HudConfig() {}
+
+    private static Map<String, Widget> defaultsMap() {
+        Map<String, Widget> result = new LinkedHashMap<>();
+        result.put("fps", new Widget(true, 8, 8, 1.0f));
+        result.put("keystrokes", new Widget(true, 8, 34, 1.0f));
+        result.put("cps", new Widget(true, 8, 105, 1.0f));
+        result.put("coordinates", new Widget(true, 8, 128, 1.0f));
+        result.put("ping", new Widget(true, 8, 151, 1.0f));
+        result.put("direction", new Widget(true, 8, 174, 1.0f));
+        result.put("armor", new Widget(true, 8, 197, 1.0f));
+        result.put("effects", new Widget(true, 8, 220, 1.0f));
+        return result;
+    }
 
     private static Data defaults() {
         Data result = new Data();
@@ -40,8 +45,9 @@ public final class HudConfig {
                 Data saved = GSON.fromJson(Files.readString(FILE), Data.class);
                 if (saved != null && saved.widgets != null) {
                     data = defaults();
-                    saved.widgets.forEach((key, value) -> {
-                        if (DEFAULTS.containsKey(key) && value != null) data.widgets.put(key, value.clamp());
+                    DEFAULTS.keySet().forEach(key -> {
+                        Widget value = saved.widgets.get(key);
+                        if (value != null) data.widgets.put(key, value.clamp());
                     });
                     return;
                 }
@@ -118,6 +124,14 @@ public final class HudConfig {
         save();
     }
 
+    public static synchronized String keyName(String id) {
+        int keyCode = get(id).keyCode;
+        return keyCode == GLFW.GLFW_KEY_UNKNOWN
+                ? "NONE"
+                : com.mojang.blaze3d.platform.InputConstants.Type.KEYSYM.getOrCreate(keyCode)
+                        .getDisplayName().getString();
+    }
+
     public static synchronized int panelColor() {
         return ThemeManager.withOpacity(ThemeManager.current().panelColor(), ThemeManager.current().uiOpacity());
     }
@@ -150,6 +164,7 @@ public final class HudConfig {
         public int x;
         public int y;
         public float scale;
+        public int keyCode = GLFW.GLFW_KEY_UNKNOWN;
 
         public Widget(boolean enabled, int x, int y, float scale) {
             this.enabled = enabled;
@@ -159,13 +174,18 @@ public final class HudConfig {
         }
 
         public Widget copy() {
-            return new Widget(enabled, x, y, scale);
+            Widget copy = new Widget(enabled, x, y, scale);
+            copy.keyCode = keyCode;
+            return copy;
         }
 
         private Widget clamp() {
             x = Math.max(0, Math.min(x, 10000));
             y = Math.max(0, Math.min(y, 10000));
             scale = Math.max(0.5f, Math.min(scale, 2.0f));
+            if (keyCode < GLFW.GLFW_KEY_UNKNOWN || keyCode > GLFW.GLFW_KEY_LAST) {
+                keyCode = GLFW.GLFW_KEY_UNKNOWN;
+            }
             return this;
         }
     }

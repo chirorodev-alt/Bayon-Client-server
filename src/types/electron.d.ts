@@ -61,6 +61,17 @@ export type InstallModrinthPayload = {
   worldName?: string;
 };
 
+export type ModrinthUpdateResult = {
+  updateAvailable: boolean;
+  version: string;
+  mods: InstalledMod[];
+};
+
+export type ModrinthCategory = {
+  name: string;
+  projectType: string | null;
+};
+
 export type BayonModStatus = {
   available: boolean;
   installed: boolean;
@@ -76,6 +87,9 @@ export type LaunchOptions = {
   loader: string;
   profileName?: string;
   username?: string;
+  accountId?: string;
+  accountType?: 'offline' | 'microsoft';
+  serverAddress?: string;
   memory?: number;
   profileId?: string;
   javaPath?: string;
@@ -134,6 +148,7 @@ declare global {
       setMinimizeToTray: (enabled: boolean) => Promise<void>;
       onWindowStateChange: (callback: (state: 'maximized' | 'restored') => void) => void;
       searchMods: (options: ModSearchOptions) => Promise<ModCatalogResult[]>;
+      getModrinthCategories: (projectType: ModrinthProjectType) => Promise<ModrinthCategory[]>;
       getMinecraftVersions: () => Promise<string[]>;
       getMinecraftWorlds: (profileId: string) => Promise<string[]>;
       getManagedJavaRuntimes: (preferredJavaPath?: string) => Promise<ManagedJavaRuntime[]>;
@@ -151,6 +166,9 @@ declare global {
       installAppUpdate: () => Promise<boolean>;
       startGoogleOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;
       startMicrosoftOAuth: (clientId: string) => Promise<{ code: string; codeVerifier: string; redirectUri: string }>;
+      signInMinecraftMicrosoft: (clientId: string) => Promise<{ id: string; username: string }>;
+      cancelMinecraftMicrosoftSignIn: () => Promise<{ success: boolean }>;
+      removeMinecraftMicrosoftAccount: (profileId: string) => Promise<{ success: boolean }>;
       onAppUpdateState: (callback: (state: AppUpdateState) => void) => () => void;
       onJavaRuntimeProgress: (callback: (data: JavaRuntimeProgress) => void) => () => void;
       openModProject: (source: ModCatalogSource, projectUrl: string) => Promise<void>;
@@ -160,10 +178,13 @@ declare global {
       installBayonMod: (profileId?: string) => Promise<BayonModStatus>;
       uninstallBayonMod: (profileId?: string) => Promise<BayonModStatus>;
       installModrinthMod: (payload: InstallModrinthPayload) => Promise<InstalledMod[]>;
+      checkModrinthModUpdate: (payload: { projectId: string; profileId: string; gameVersion: string; loader: string; projectType: ModrinthProjectType }) => Promise<ModrinthUpdateResult>;
       toggleMod: (id: string, enabled: boolean, profileId?: string) => Promise<InstalledMod[]>;
       uninstallMod: (id: string, profileId?: string) => Promise<InstalledMod[]>;
       openModsFolder: (profileId?: string, projectType?: ModrinthProjectType) => Promise<void>;
       launchMinecraft: (options: LaunchOptions) => Promise<{ success: boolean }>;
+      isMinecraftRunning: () => Promise<{ running: boolean }>;
+      stopMinecraft: () => Promise<{ success: boolean }>;
       onLaunchProgress: (callback: (data: LaunchProgressData) => void) => () => void;
       getDiscordPresenceStatus: () => Promise<DiscordPresenceStatus>;
       getDiscordPresenceConfig: () => Promise<{ clientId: string | null }>;

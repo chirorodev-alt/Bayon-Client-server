@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window:state-change', (_event, state) => callback(state));
   },
   searchMods: (options) => ipcRenderer.invoke('mods:search', options),
+  getModrinthCategories: (projectType) => ipcRenderer.invoke('mods:get-modrinth-categories', projectType),
   getMinecraftVersions: () => ipcRenderer.invoke('minecraft:get-versions'),
   getMinecraftWorlds: (profileId) => ipcRenderer.invoke('minecraft:get-worlds', profileId),
   getManagedJavaRuntimes: (preferredJavaPath) => ipcRenderer.invoke('java:get-runtimes', preferredJavaPath),
@@ -27,6 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installAppUpdate: () => ipcRenderer.invoke('app-update:install'),
   startGoogleOAuth: (clientId) => ipcRenderer.invoke('auth:google-start', clientId),
   startMicrosoftOAuth: (clientId) => ipcRenderer.invoke('auth:microsoft-start', clientId),
+  signInMinecraftMicrosoft: (clientId) => ipcRenderer.invoke('minecraft:auth-sign-in', clientId),
+  cancelMinecraftMicrosoftSignIn: () => ipcRenderer.invoke('minecraft:auth-cancel'),
+  removeMinecraftMicrosoftAccount: (profileId) => ipcRenderer.invoke('minecraft:auth-remove', profileId),
   onAppUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('app-update:state', listener);
@@ -44,10 +48,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installBayonMod: (profileId) => ipcRenderer.invoke('mods:bayon-install', profileId),
   uninstallBayonMod: (profileId) => ipcRenderer.invoke('mods:bayon-uninstall', profileId),
   installModrinthMod: (payload) => ipcRenderer.invoke('mods:install-modrinth', payload),
+  checkModrinthModUpdate: (payload) => ipcRenderer.invoke('mods:check-modrinth-update', payload),
   toggleMod: (id, enabled, profileId) => ipcRenderer.invoke('mods:toggle', id, enabled, profileId),
   uninstallMod: (id, profileId) => ipcRenderer.invoke('mods:uninstall', id, profileId),
   openModsFolder: (profileId, projectType) => ipcRenderer.invoke('mods:open-folder', profileId, projectType),
   launchMinecraft: (options) => ipcRenderer.invoke('minecraft:launch', options),
+  isMinecraftRunning: () => ipcRenderer.invoke('minecraft:is-running'),
+  stopMinecraft: () => ipcRenderer.invoke('minecraft:stop'),
   onLaunchProgress: (callback) => {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('launch:progress', listener);

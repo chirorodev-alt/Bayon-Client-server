@@ -191,7 +191,7 @@ export function SkinModelPreview({ imageUrl, skinName, rotation, slimArms, onRot
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
-    camera.position.set(30, 17, 42);
+    camera.position.set(23, 13, 36);
     camera.lookAt(0, 2, 0);
 
     scene.add(new THREE.HemisphereLight(0xe8f1ff, 0x252b35, 2.2));

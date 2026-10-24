@@ -30,6 +30,7 @@ import {
   Play,
   Plus,
   Search,
+  Server,
   Sparkles,
   Ticket,
   RefreshCw,
@@ -51,11 +52,11 @@ import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate 
 import { useFriends } from './hooks/useFriends';
 import { useServers } from './hooks/useServers';
 import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type ModrinthProjectType } from './services/modCatalog';
-import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, purchaseCosmetic, redeemBacoinsCode, signInWithMicrosoft, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
+import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, getMicrosoftClientId, purchaseCosmetic, redeemBacoinsCode, signInWithMicrosoft, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useProfileStore, type VersionProfile } from './store/useProfileStore';
-import type { AppUpdateState, BayonModStatus, ClientDirectories, DiscordPresenceStatus, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
+import type { AppUpdateState, BayonModStatus, ClientDirectories, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
 import bayonIcon from './assets/bayon-icon.png';
 import { BACKEND_BASE_URL } from './services/backendConfig';
 import { localizeApp } from './services/uiTranslations';
@@ -99,17 +100,17 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { to: '/home', label: 'Play', icon: Play },
-  { to: '/profiles', label: 'Profiles', icon: UserRound },
-  { to: '/accounts', label: 'Accounts', icon: UsersRound },
-  { to: '/store', label: 'Store', icon: ShoppingCart },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/servers', label: 'Partner Servers', icon: Server },
+  { to: '/profiles', label: 'Instances', icon: UserRound },
   { to: '/mods', label: 'Mods', icon: Layers3 },
   { to: '/skins', label: 'Skins', icon: Shirt },
+  { to: '/store', label: 'Store', icon: ShoppingCart },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 const navigationLabels = {
-  English: ['Play', 'Profiles', 'Accounts', 'Store', 'Settings', 'Mods', 'Skins'],
-  Khmer: ['\u179B\u17C1\u1784', '\u1794\u17D2\u179A\u17BC\u17A0\u17D2\u179C\u17B6\u179B\u17CB', '\u1782\u178E\u1793\u17B8', '\u17A0\u17B6\u1784', '\u1780\u17B6\u179A\u1780\u17C6\u178E\u178F\u17CB', '\u1798\u17C9\u17BC\u178A', '\u179F\u17D2\u1794\u17C2\u1780'],
+  English: ['Play', 'Partner Servers', 'Instances', 'Mods', 'Skins', 'Store', 'Settings'],
+  Khmer: ['\u179B\u17C1\u1784', 'ម៉ាស៊ីនមេដៃគូ', '\u1794\u17D2\u179A\u17BC\u179F\u17C0\u179B', '\u1798\u17C9\u17BC\u178A', '\u179F\u17D2\u1794\u17C2\u1780', '\u17A0\u17B6\u1784', '\u1780\u17B6\u179A\u1780\u17C6\u178E\u178F\u17CB'],
 } as const;
 
 const versions = ['26.3', '26.2'];
@@ -275,6 +276,7 @@ function AppShell() {
               <Routes>
                 <Route path="/" element={<Navigate to="/home" replace />} />
                 <Route path="/home" element={<HomePage />} />
+                <Route path="/servers" element={<PartnerServersPage />} />
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/play" element={<PlayPage />} />
                 <Route path="/mods" element={<ModsPage />} />
@@ -435,7 +437,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
   }, []);
 
   const signInBacoins = async () => {
-    setBetaBusy(true); setBetaNotice('');
+    setBetaBusy(true); setBetaNotice('Finish signing in on Microsoft’s page. Enter any verification code there.');
     try {
       await signInWithMicrosoft(activeAccount ? { id: activeAccount.id, username: activeAccount.username } : undefined);
       setBacoinsIdentity(getBacoinsIdentity());
@@ -453,7 +455,6 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         <LogoMark />
         <div>
           <div className="title-wordmark">BAYON CLIENT</div>
-          <div className="title-tagline">{language === 'Khmer' ? 'លេង / កែសម្រួល / ប្លែកពីគេ' : 'PLAY / CUSTOMIZE / BE DIFFERENT'}</div>
         </div>
       </div>
 
@@ -461,10 +462,10 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
         <div className="title-dropdown-wrap">
           <button type="button" className="title-select" onClick={() => setAccountOpen(!accountOpen)}>
             <MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="avatar-mini" />
-            <span className="title-select-copy"><strong>{activeAccount?.username ?? 'No account'}</strong><small>{activeAccount ? 'Offline account' : 'Not signed in'}</small></span>
+            <span className="title-select-copy"><strong>{activeAccount?.username ?? 'No account'}</strong><small>{activeAccount ? 'Minecraft profile' : 'Not signed in'}</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
-          {accountOpen && <div className="title-popover"><strong>{activeAccount?.username ?? 'No account selected'}</strong><span>{activeAccount ? 'Offline account' : 'Create an offline account to continue'}</span><NavLink to="/accounts" onClick={() => setAccountOpen(false)}>Manage accounts</NavLink></div>}
+          {accountOpen && <div className="title-popover"><strong>{activeAccount?.username ?? 'No account selected'}</strong><span>{activeAccount ? 'Minecraft profile' : 'Add a Minecraft profile to continue'}</span><NavLink to="/accounts" onClick={() => setAccountOpen(false)}>Manage accounts</NavLink></div>}
         </div>
         <div className="client-online-count" title="Bayon Client sessions active in the last 90 seconds" aria-label={`${onlineUsers ?? '—'} Bayon Client users online`}>
           <span className="client-online-indicator" />{onlineUsers === null ? '—' : onlineUsers.toLocaleString()} <small>{language === 'Khmer' ? 'កំពុងប្រើ' : 'online'}</small>
@@ -498,6 +499,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
               <span>Sign in with Microsoft to sync Bacoins{activeAccount ? <> for <strong>{activeAccount.username}</strong></> : ''}.</span>
               <button type="button" onClick={() => void signInBacoins()} disabled={betaBusy}>{betaBusy ? 'Connecting…' : 'Continue with Microsoft'}</button>
               {betaNotice && <span className="email-auth-notice" role="status">{betaNotice}</span>}
+              <small>Microsoft opens in your browser. If Microsoft offers a verification code, enter it on Microsoft's sign-in page; Bayon never sees or stores that code.</small>
               <small>Email-only offline profiles remain local. Add a contact email in Accounts; Microsoft sign-in secures your synced balance.</small>
             </>}
           </div>}
@@ -537,17 +539,17 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
 }
 
 function Sidebar() {
-  const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
   const language = useSettingsStore((state) => state.language === 'Khmer' ? 'Khmer' : 'English');
   const [appVersion, setAppVersion] = useState('1.1.5');
   useEffect(() => { void window.electronAPI?.getAppVersion().then(setAppVersion).catch(() => {}); }, []);
   return (
     <aside className="sidebar">
       <nav className="sidebar-nav">
-        {navItems.map(({ to, label, icon: Icon }, index) => (
-          <div key={to} className={index === 6 ? 'sidebar-library' : ''}>
+        {navItems.slice(0, -1).map(({ to, label, icon: Icon }, index) => (
           <NavLink
+            key={to}
             to={to}
+            title={navigationLabels[language][index] ?? label}
             className={({ isActive }) =>
               ['sidebar-item', isActive ? 'sidebar-item-active' : ''].join(' ')
             }
@@ -559,15 +561,20 @@ function Sidebar() {
               </>
             )}
           </NavLink>
-          </div>
         ))}
       </nav>
 
       <div className="sidebar-bottom">
-        <div className="sidebar-profile">
-          <MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="avatar-large" />
-          <div><strong>{activeAccount?.username ?? 'Local Player'}</strong><small>{activeAccount ? 'Offline account' : 'No account selected'}</small></div>
-        </div>
+        <NavLink
+          to="/settings"
+          title={navigationLabels[language][navItems.length - 1]}
+          className={({ isActive }) =>
+            ['sidebar-item', 'sidebar-settings-item', isActive ? 'sidebar-item-active' : ''].join(' ')
+          }
+        >
+          <Settings className="h-[18px] w-[18px]" />
+          <span>{navigationLabels[language][navItems.length - 1]}</span>
+        </NavLink>
         <div className="client-version">
           <LogoMark />
           <span><strong>BAYON CLIENT</strong><small>v{appVersion}</small></span>
@@ -593,12 +600,51 @@ function HomePage() {
   const [launchProgress, setLaunchProgress] = useState(0);
   const [launchStatus, setLaunchStatus] = useState('Ready');
   const [launching, setLaunching] = useState(false);
+  const [gameRunning, setGameRunning] = useState(false);
+  const [stoppingGame, setStoppingGame] = useState(false);
   const { clientNews, newsLoading, newsError, refreshNews } = useClientNews(2);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendSearchInput, setFriendSearchInput] = useState('');
   const [friendAdding, setFriendAdding] = useState(false);
   const [friendAddError, setFriendAddError] = useState<string | null>(null);
   const settings = useSettingsStore();
+
+  useEffect(() => {
+    let active = true;
+    void window.electronAPI?.isMinecraftRunning().then(({ running }) => {
+      if (active) setGameRunning(running);
+    }).catch((error: unknown) => {
+      console.error('Could not check Minecraft process status.', error);
+    });
+    const unsubscribe = window.electronAPI?.onLaunchProgress((data) => {
+      setLaunchProgress(data.progress);
+      setLaunchStatus(data.status);
+      if (data.progress === 100) {
+        setLaunching(false);
+        setGameRunning(true);
+        setStoppingGame(false);
+        void window.electronAPI?.updateDiscordActivity({
+          state: `Playing ${selectedVersion}`,
+          version: selectedVersion,
+          loader: selectedLoader,
+        });
+      } else if (data.progress === 0) {
+        setLaunching(false);
+        setGameRunning(false);
+        setStoppingGame(false);
+        setLaunchProgress(0);
+        void window.electronAPI?.updateDiscordActivity({
+          state: undefined,
+          version: selectedVersion,
+          loader: selectedLoader,
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [selectedVersion, selectedLoader]);
 
   const handleAddFriendSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -617,7 +663,7 @@ function HomePage() {
     }
   };
   const startLaunchProcess = async (profileToLaunch = activeProfile) => {
-    if (launching) return;
+    if (launching || gameRunning) return;
     if (!profileToLaunch) {
       setLaunchStatus('Create a profile before launching.');
       navigate('/profiles?create=1');
@@ -626,24 +672,11 @@ function HomePage() {
     const launchVersion = profileToLaunch.version;
     setLaunching(true);
     setLaunchProgress(5);
-    setLaunchStatus('Initialising launchâ€¦');
+    setLaunchStatus('Preparing Minecraft…');
     void window.electronAPI?.updateDiscordActivity({
       state: `Launching ${selectedLoader} ${launchVersion}`,
       version: launchVersion,
       loader: selectedLoader,
-    });
-
-    const unsubscribe = window.electronAPI?.onLaunchProgress?.((data) => {
-      setLaunchProgress(data.progress);
-      setLaunchStatus(data.status);
-      if (data.progress === 0 || data.progress === 100) {
-        setLaunching(false);
-        void window.electronAPI?.updateDiscordActivity({
-          state: data.progress === 100 ? `Playing ${launchVersion}` : undefined,
-          version: launchVersion,
-          loader: selectedLoader,
-        });
-      }
     });
 
     try {
@@ -653,19 +686,34 @@ function HomePage() {
         profileName: profileToLaunch.name,
         profileId: profileToLaunch.id,
         username: activeAccount?.username ?? 'Player',
+        accountId: activeAccount?.id,
+        accountType: activeAccount?.type ?? 'offline',
         memory: settings.selectedRam ?? 4,
         javaPath: settings.javaPath,
         customArgs: settings.customArgs,
       });
     } catch (err) {
       setLaunchProgress(0);
-      setLaunchStatus(`Launch failed: ${(err as Error).message}`);
+      setLaunchStatus(`Launch failed: ${err instanceof Error ? err.message : String(err)}`);
       setLaunching(false);
-    } finally {
-      unsubscribe?.();
     }
   };
-  useEffect(() => undefined, []);
+  const stopGame = async () => {
+    if (!gameRunning || stoppingGame) return;
+    setStoppingGame(true);
+    setLaunchStatus('Stopping Minecraft…');
+    try {
+      const result = await window.electronAPI?.stopMinecraft();
+      if (!result?.success) {
+        setGameRunning(false);
+        setStoppingGame(false);
+        setLaunchStatus('Minecraft is no longer running.');
+      }
+    } catch (error) {
+      setStoppingGame(false);
+      setLaunchStatus(`Could not stop Minecraft: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22 }} className="dashboard-layout">
@@ -673,42 +721,42 @@ function HomePage() {
         <div className="dashboard-hero">
           <div className="hero-overlay" />
           <div className="hero-copy">
-            <div className="eyebrow">{activeAccount ? 'OFFLINE PROFILE' : 'WELCOME BACK,'}</div>
-            <h1>{activeAccount?.username ?? 'Welcome back'}</h1>
-            <p className="hero-motto">Explore. Build. Survive.</p>
-            <p className="hero-caption">The best Minecraft launcher for your journey.</p>
-            <button type="button" className="change-skin-button" onClick={() => navigate('/skins')}><Shirt className="h-4 w-4" /> Change Skin <ChevronRight className="h-4 w-4" /></button>
+            <span className="sr-only" role="status">{launchStatus}</span>
             <div className="play-control-wrap">
-              <button type="button" onClick={() => void startLaunchProcess()} className="launch-button" disabled={launching}>
-                {launching ? <span className="launch-spinner" /> : <Play className="h-6 w-6 fill-current" />}
-                <span><strong>{launching ? `PREPARING ${launchProgress}%` : 'LAUNCH GAME'}</strong><small>{selectedVersion} - {selectedLoader}</small></span>
+              <button type="button" onClick={() => gameRunning ? void stopGame() : void startLaunchProcess()} className="launch-button" disabled={launching || stoppingGame}>
+                {(launching || stoppingGame) && <span className="launch-spinner" />}
+                <span><strong>{launching ? `PREPARING ${launchProgress}%` : stoppingGame ? 'STOPPING GAME' : gameRunning ? 'STOP GAME' : 'LAUNCH GAME'}</strong><small>{launchStatus !== 'Ready' && (launching || stoppingGame) ? launchStatus : `${selectedVersion} · ${selectedLoader}`}</small>{!launching && !stoppingGame && <em>Minecraft Java Edition</em>}</span>
               </button>
-              <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Select loader"><ChevronDown className="h-5 w-5" /></button>
-              {loaderMenu && <div className="hero-dropdown loader-dropdown"><button type="button" onClick={() => setLoaderMenu(false)}>Fabric</button></div>}
+              <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Choose profile version" aria-expanded={loaderMenu}><ChevronDown className="h-5 w-5" /></button>
+              {loaderMenu && <div className="hero-dropdown profile-version-dropdown" role="menu" aria-label="Choose profile version">
+                <strong>Choose Profile Version</strong>
+                {profiles.length ? profiles.map((profile) => <button type="button" role="menuitemradio" aria-checked={profile.id === activeProfileId} className={profile.id === activeProfileId ? 'profile-version-option profile-version-option-active' : 'profile-version-option'} key={profile.id} onClick={() => { selectProfile(profile.id); setLoaderMenu(false); }}>
+                  <span><strong>{profile.name}</strong><small>Minecraft {profile.version} · {profile.loader}</small></span>
+                  {profile.id === activeProfileId && <Check className="h-4 w-4" />}
+                </button>) : <span className="profile-version-empty">No profiles yet.</span>}
+                <button type="button" className="profile-version-create" onClick={() => { setLoaderMenu(false); navigate('/profiles?create=1'); }}><Plus className="h-3.5 w-3.5" /> Create Profile</button>
+              </div>}
+              {launching && launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
             </div>
-            <div className="hero-status">
-              <span>{launchStatus === 'Ready' ? 'Ready to prepare â€” launching the game is not connected.' : launchStatus}</span>
-              <button type="button" onClick={() => navigate('/play')}>Launch settings <ChevronRight className="h-3 w-3" /></button>
-            </div>
-            {launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
           </div>
           <div className="home-profile-strip" aria-label="Game profiles">
             {profiles.map((profile) => <div key={profile.id} className={`home-profile-card ${profile.id === activeProfileId ? 'home-profile-card-active' : ''}`}>
               <button type="button" className="home-profile-select" onClick={() => selectProfile(profile.id)} aria-pressed={profile.id === activeProfileId}>
-                <span className="home-profile-icon"><Layers3 className="h-5 w-5" /></span><span className="home-profile-copy"><strong>{profile.name}</strong><small>Fabric {profile.version}</small></span>
+                <span className="home-profile-icon"><FileText className="h-4 w-4" /></span><span className="home-profile-copy"><strong>{profile.name}</strong><small>Fabric {profile.version}</small></span>
               </button>
-              <button type="button" className="home-profile-play" aria-label={`Launch ${profile.name}`} disabled={launching} onClick={() => { selectProfile(profile.id); void startLaunchProcess(profile); }}><Play className="h-4 w-4 fill-current" /></button>
+              <button type="button" className="home-profile-play" aria-label={`Launch ${profile.name}`} disabled={launching || gameRunning} onClick={() => { selectProfile(profile.id); void startLaunchProcess(profile); }}><Play className="h-4 w-4 fill-current" /></button>
             </div>)}
             <button type="button" className="home-profile-add" onClick={() => navigate('/profiles?create=1')}><Plus className="h-5 w-5" /><span>Add a Profile</span></button>
           </div>
           <div className="dashboard-avatar" aria-label={`${activeAccount?.username ?? 'Steve'} Minecraft skin`}>
+            <span className="skin-nameplate">{activeAccount?.username ?? 'Steve'}</span>
             <div className="skin-aura skin-aura-back" />
             <div className="skin-aura skin-aura-flame" />
             <div className="skin-aura skin-aura-orbit" />
             <div className="skin-aura skin-aura-core" />
             <div className="home-skin-preview">
               <Suspense fallback={<MinecraftAvatar username={activeAccount?.username ?? 'Steve'} skin={activeAccount?.skin} className="home-skin-fallback" />}>
-                <SkinModelPreview imageUrl={activeAccount?.skin?.imageUrl} skinName={activeAccount?.skin?.name ?? 'Default'} rotation={0} slimArms={false} onRotationChange={() => {}} autoRotate flightPose />
+                <SkinModelPreview imageUrl={activeAccount?.skin?.imageUrl} skinName={activeAccount?.skin?.name ?? 'Default'} rotation={0} slimArms={false} onRotationChange={() => {}} autoRotate />
               </Suspense>
             </div>
           </div>
@@ -904,6 +952,118 @@ function useClientNews(limit: number) {
   return { clientNews, newsLoading, newsError, refreshNews };
 }
 
+function PartnerServersPage() {
+  const navigate = useNavigate();
+  const serversState = useServers();
+  const profiles = useProfileStore((state) => state.profiles);
+  const activeProfileId = useProfileStore((state) => state.activeProfileId);
+  const activeAccount = useAccountStore((state) => state.accounts.find((account) => account.id === state.activeAccountId));
+  const settings = useSettingsStore();
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0];
+
+  const joinServer = async (server: { id: string; name: string; address: string }) => {
+    if (activeAccount?.type !== 'microsoft') {
+      setStatus('Sign in with a Microsoft Minecraft account to join a partner server.');
+      navigate('/accounts');
+      return;
+    }
+    if (!activeProfile) {
+      setStatus('Create a Minecraft profile before joining a server.');
+      navigate('/profiles?create=1');
+      return;
+    }
+    if (launchingId) return;
+
+    setLaunchingId(server.id);
+    setStatus(`Preparing ${server.name}…`);
+    const unsubscribe = window.electronAPI?.onLaunchProgress((progress) => {
+      setStatus(progress.status);
+      if (progress.progress === 0 || progress.progress === 100) setLaunchingId(null);
+    });
+    try {
+      await window.electronAPI?.updateDiscordActivity({
+        state: `Joining ${server.name}`,
+        version: activeProfile.version,
+        loader: activeProfile.loader,
+      });
+      await window.electronAPI?.launchMinecraft({
+        version: activeProfile.version,
+        loader: activeProfile.loader,
+        profileName: activeProfile.name,
+        profileId: activeProfile.id,
+        username: activeAccount.username,
+        accountId: activeAccount.id,
+        accountType: 'microsoft',
+        memory: settings.selectedRam,
+        javaPath: settings.javaPath,
+        customArgs: settings.customArgs,
+        serverAddress: server.address,
+      });
+    } catch (cause) {
+      setStatus(cause instanceof Error ? cause.message : 'Could not launch Minecraft.');
+      setLaunchingId(null);
+    } finally {
+      unsubscribe?.();
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="partner-servers-page page-scroll p-6">
+      <div className="partner-servers-heading">
+        <PageHeader title="Partner Servers" subtitle="Choose a server to launch Minecraft and connect directly." />
+        <button type="button" className="account-select-button" onClick={serversState.refresh}><RefreshCw className="h-4 w-4" /> Refresh</button>
+      </div>
+      {activeAccount?.type !== 'microsoft' && <div className="partner-auth-notice"><KeyRound className="h-4 w-4" /><span>Online partner servers require a Microsoft account with Minecraft Java ownership.</span><button type="button" onClick={() => navigate('/accounts')}>Sign in</button></div>}
+      {status && <p className="partner-launch-status" role="status">{status}</p>}
+      {serversState.error && <div className="partner-server-empty" role="alert"><strong>Could not load partner servers</strong><span>{serversState.error}</span><button type="button" onClick={serversState.refresh}>Try again</button></div>}
+      {serversState.loading && <div className="partner-server-empty" role="status"><strong>Loading partner servers…</strong><span>Getting the latest server list.</span></div>}
+      {!serversState.loading && !serversState.error && serversState.servers.length === 0 && <div className="partner-server-empty"><strong>No partner servers yet</strong><span>Check again later for servers added by Bayon.</span></div>}
+      <div className="partner-server-grid">
+        {serversState.servers.map((server) => {
+          const iconUrl = typeof server.icon === 'string' && server.icon.toLowerCase().startsWith('https://') ? server.icon : '';
+          const playerCount = server.formattedCount || (
+            typeof server.onlinePlayers === 'number' && typeof server.maxPlayers === 'number'
+              ? `${server.onlinePlayers.toLocaleString()} / ${server.maxPlayers.toLocaleString()}`
+              : null
+          );
+          return (
+            <article
+              className="partner-server-card"
+              key={server.id}
+              role="button"
+              tabIndex={server.online === false || launchingId ? -1 : 0}
+              aria-disabled={server.online === false || Boolean(launchingId)}
+              aria-label={`Join ${server.name}`}
+              onClick={() => void joinServer(server)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  void joinServer(server);
+                }
+              }}
+            >
+              <div className="partner-server-art">
+                {iconUrl ? <img src={iconUrl} alt="" referrerPolicy="no-referrer" /> : <Server className="h-11 w-11" />}
+                <span className={server.online === false ? 'partner-server-offline' : 'partner-server-online'}><i />{server.online === false ? 'Offline' : server.online === true ? 'Online' : 'Partner'}</span>
+              </div>
+              <div className="partner-server-copy">
+                <div className="partner-server-title"><div><h2>{server.name}</h2><span>{server.address}</span></div><Globe className="h-4 w-4" /></div>
+                <p>{server.motd || 'Explore this Bayon partner server with your Minecraft profile.'}</p>
+                <div className="partner-server-footer"><span>{server.flag || 'Bayon Partner'}</span>{playerCount && <span>{playerCount} players</span>}</div>
+                <span className="partner-server-join">
+                  <Play className="h-4 w-4 fill-current" />{launchingId === server.id ? 'Launching…' : 'Join Server'}
+                </span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
 function NewsPage() {
   const navigate = useNavigate();
   const { clientNews, newsLoading, newsError, refreshNews } = useClientNews(100);
@@ -1019,7 +1179,7 @@ function StorePage() {
       {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
 
       {!signedIn ? <GlassCard className="mb-5 flex flex-wrap items-center justify-between gap-5 p-5">
-        <div><h2 className="font-semibold">Connect Bayon Client</h2><p className="mt-1 text-xs text-white/45">Sign in with the same Microsoft account in Bayon Client and the website to sync Bacoins and cosmetics.</p></div>
+        <div><h2 className="font-semibold">Connect Bayon Client</h2><p className="mt-1 text-xs text-white/45">Sign in with the same Microsoft account in Bayon Client and the website to sync Bacoins and cosmetics. Microsoft handles any verification code in its browser sign-in page.</p></div>
         <button type="button" onClick={() => window.dispatchEvent(new Event('bayon:open-bacoins-menu'))} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white/80 hover:bg-white/10">Open beta Bacoins</button>
       </GlassCard> : <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto]">
         <GlassCard className="p-5"><div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300/10"><Ticket className="h-5 w-5 text-amber-200" /></div><div><h2 className="font-semibold">Redeem a code</h2><p className="mt-1 text-xs text-white/45">Each code can be claimed once per account, up to its claim limit.</p></div></div><form onSubmit={(event) => void redeem(event)} className="flex flex-wrap gap-2"><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Enter Bacoins code" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#111820] px-3 py-2.5 text-sm uppercase outline-none focus:border-amber-200/40" /><button type="submit" disabled={Boolean(busy)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-100 disabled:opacity-50">{busy === 'redeem' ? 'Redeeming…' : 'Redeem'}</button></form></GlassCard>
@@ -1120,6 +1280,7 @@ function AccountsPage() {
   const accounts = useAccountStore((state) => state.accounts);
   const activeAccountId = useAccountStore((state) => state.activeAccountId);
   const createOfflineAccount = useAccountStore((state) => state.createOfflineAccount);
+  const createMicrosoftAccount = useAccountStore((state) => state.createMicrosoftAccount);
   const selectAccount = useAccountStore((state) => state.selectAccount);
   const removeAccount = useAccountStore((state) => state.removeAccount);
   const updateAccountEmail = useAccountStore((state) => state.updateAccountEmail);
@@ -1132,6 +1293,8 @@ function AccountsPage() {
   const [microsoftIdentity, setMicrosoftIdentity] = useState(getBacoinsIdentity);
   const [microsoftBusy, setMicrosoftBusy] = useState(false);
   const [microsoftNotice, setMicrosoftNotice] = useState('');
+  const [minecraftMicrosoftBusy, setMinecraftMicrosoftBusy] = useState(false);
+  const [minecraftMicrosoftNotice, setMinecraftMicrosoftNotice] = useState('');
   const [accountQuery, setAccountQuery] = useState('');
   const [newestFirst, setNewestFirst] = useState(true);
   const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
@@ -1145,7 +1308,8 @@ function AccountsPage() {
 
   const connectMicrosoft = async () => {
     setMicrosoftBusy(true);
-    setMicrosoftNotice('');
+    setMicrosoftNotice('Finish signing in on Microsoft’s page. Enter any verification code there.');
+    setMinecraftMicrosoftNotice('');
     try {
       const selected = accounts.find((account) => account.id === activeAccountId);
       await signInWithMicrosoft(selected ? { id: selected.id, username: selected.username } : undefined);
@@ -1155,6 +1319,48 @@ function AccountsPage() {
       setMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not connect the Microsoft account.');
     } finally {
       setMicrosoftBusy(false);
+    }
+  };
+
+  const signInMinecraftWithMicrosoft = async () => {
+    setMinecraftMicrosoftBusy(true);
+    setMicrosoftNotice('');
+    setMinecraftMicrosoftNotice('Finish Microsoft sign-in in the browser window that opens.');
+    try {
+      const clientId = await getMicrosoftClientId();
+      if (!clientId) throw new Error('Microsoft Minecraft sign-in is not configured on the Bayon server yet.');
+      const profile = await window.electronAPI?.signInMinecraftMicrosoft(clientId);
+      if (!profile) throw new Error('Microsoft Minecraft sign-in is available in the Bayon desktop app.');
+      createMicrosoftAccount(profile.id, profile.username);
+      setMinecraftMicrosoftNotice(`Minecraft account ${profile.username} is ready for online servers.`);
+    } catch (cause) {
+      setMinecraftMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not sign in to Minecraft.');
+    } finally {
+      setMinecraftMicrosoftBusy(false);
+    }
+  };
+
+  const confirmRemoveAccount = async () => {
+    if (!confirmRemove) return;
+    const account = accounts.find((item) => item.id === confirmRemove);
+    if (!account) return;
+    try {
+      if (account.type === 'microsoft') {
+        if (!window.electronAPI?.removeMinecraftMicrosoftAccount) throw new Error('Account removal is only available in the Bayon desktop app.');
+        await window.electronAPI.removeMinecraftMicrosoftAccount(account.id);
+      }
+      removeAccount(account.id);
+      setConfirmRemove(null);
+    } catch (cause) {
+      setMinecraftMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not remove the account.');
+    }
+  };
+
+  const cancelMinecraftSignIn = async () => {
+    try {
+      await window.electronAPI?.cancelMinecraftMicrosoftSignIn();
+    } catch (cause) {
+      setMinecraftMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not cancel Microsoft sign-in.');
     }
   };
 
@@ -1192,7 +1398,7 @@ function AccountsPage() {
           <PageHeader title="Accounts" subtitle="Manage your Minecraft profiles and secure Bayon account connections." />
           <button type="button" className="launch-process-button" onClick={() => setAccountChoiceOpen(true)}><Plus className="h-4 w-4" /> Add Account</button>
         </div>
-        {microsoftNotice && <div className="account-auth-notice" role="status"><KeyRound className="h-4 w-4" /><span>{microsoftNotice}{microsoftIdentity?.email && <> <strong>{microsoftIdentity.email}</strong></>}</span></div>}
+        {(microsoftNotice || minecraftMicrosoftNotice) && <div className="account-auth-notice" role="status"><KeyRound className="h-4 w-4" /><span>{minecraftMicrosoftNotice || microsoftNotice}{!minecraftMicrosoftNotice && microsoftIdentity?.email && <> <strong>{microsoftIdentity.email}</strong></>}</span>{minecraftMicrosoftBusy && <button type="button" className="account-auth-cancel" onClick={() => void cancelMinecraftSignIn()}>Cancel sign-in</button>}</div>}
         <section className="account-list-section">
           <div className="account-list-heading"><div><h2>Your Accounts</h2><p>{accounts.length} local {accounts.length === 1 ? 'account' : 'accounts'} saved on this device</p></div></div>
           <div className="account-toolbar">
@@ -1207,16 +1413,16 @@ function AccountsPage() {
                 <article className={`account-profile-card ${activeAccountId === account.id ? 'account-profile-card-active' : ''}`} key={account.id}>
                   <button type="button" className="account-profile-main" onClick={() => selectAccount(account.id)} aria-pressed={activeAccountId === account.id}>
                     <MinecraftAvatar username={account.username} skin={account.skin} className="avatar-large account-profile-avatar" />
-                    <span className="account-profile-copy"><strong>{account.username}</strong><small>Local account / Added {new Date(account.createdAt).toLocaleDateString()}</small></span>
+                    <span className="account-profile-copy"><strong>{account.username}</strong><small>{account.type === 'microsoft' ? 'Microsoft Minecraft account' : 'Offline account'} / Added {new Date(account.createdAt).toLocaleDateString()}</small></span>
                     {activeAccountId === account.id && <span className="account-profile-check" title="Active account"><Check className="h-4 w-4" /></span>}
                   </button>
                   <div className="account-profile-actions">
-                    <button type="button" className="account-profile-skins" onClick={() => { selectAccount(account.id); navigate('/skins'); }}><FileImage className="h-3.5 w-3.5" />Skins</button>
+                    {account.type === 'offline' && <button type="button" className="account-profile-skins" onClick={() => { selectAccount(account.id); navigate('/skins'); }}><FileImage className="h-3.5 w-3.5" />Skins</button>}
                     <div className="relative">
                       <button type="button" className="account-profile-more" aria-label={`More actions for ${account.username}`} aria-expanded={accountMenuId === account.id} onClick={() => setAccountMenuId((current) => current === account.id ? null : account.id)}><MoreHorizontal className="h-5 w-5" /></button>
                       {accountMenuId === account.id && <><button type="button" className="fixed inset-0 z-10 cursor-default" aria-label="Close account menu" onClick={() => setAccountMenuId(null)} /><div className="account-profile-menu">
                         {activeAccountId !== account.id && <button type="button" onClick={() => { selectAccount(account.id); setAccountMenuId(null); }}>Use account</button>}
-                        <button type="button" onClick={() => { setEmailAccountId(account.id); setEmailDraft(account.email ?? ''); setAccountMenuId(null); }}><Mail className="h-3.5 w-3.5" />{account.email ? 'Edit email' : 'Add email'}</button>
+                        {account.type === 'offline' && <button type="button" onClick={() => { setEmailAccountId(account.id); setEmailDraft(account.email ?? ''); setAccountMenuId(null); }}><Mail className="h-3.5 w-3.5" />{account.email ? 'Edit email' : 'Add email'}</button>}
                         <button type="button" onClick={() => { selectAccount(account.id); navigate('/store'); setAccountMenuId(null); }}><ShoppingCart className="h-3.5 w-3.5" />Open Store</button>
                         <button type="button" className="account-profile-remove" onClick={() => { setConfirmRemove(account.id); setAccountMenuId(null); }}>Remove account</button>
                       </div></>}
@@ -1237,9 +1443,14 @@ function AccountsPage() {
             <span><strong>Offline account</strong><small>Create a local Minecraft profile with a username. No Microsoft sign-in required.</small></span>
             <ChevronRight className="h-4 w-4" />
           </button>
-          <button type="button" className="account-choice-option" disabled={microsoftBusy} onClick={() => { setAccountChoiceOpen(false); void connectMicrosoft(); }}>
+          <button type="button" className="account-choice-option" disabled={minecraftMicrosoftBusy} onClick={() => { setAccountChoiceOpen(false); void signInMinecraftWithMicrosoft(); }}>
             <span className="account-choice-icon"><KeyRound className="h-5 w-5" /></span>
-            <span><strong>{microsoftBusy ? 'Connecting…' : 'Online account'}</strong><small>Continue with Microsoft for Bayon account, Bacoins, and cosmetic sync. Minecraft sign-in is not available yet.</small></span>
+            <span><strong>{minecraftMicrosoftBusy ? 'Signing in…' : 'Microsoft Minecraft account'}</strong><small>Sign in with Microsoft and verify Minecraft Java ownership for online partner servers.</small></span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button type="button" className="account-choice-option" disabled={microsoftBusy} onClick={() => { setAccountChoiceOpen(false); void connectMicrosoft(); }}>
+            <span className="account-choice-icon"><Coins className="h-5 w-5" /></span>
+            <span><strong>{microsoftBusy ? 'Connecting…' : 'Connect Bayon account'}</strong><small>Link Microsoft to Bayon for Bacoins and cosmetic sync. Sign in on Microsoft's page and enter any verification code there; this is separate from Minecraft sign-in.</small></span>
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -1268,10 +1479,10 @@ function AccountsPage() {
         </Modal>
       )}
       {confirmRemove && (
-        <Modal title="Remove offline account?" onClose={() => setConfirmRemove(null)}>
+        <Modal title={accounts.find((item) => item.id === confirmRemove)?.type === 'microsoft' ? 'Remove Microsoft account?' : 'Remove offline account?'} onClose={() => setConfirmRemove(null)}>
           <div className="offline-account-form">
-            <p>This only removes the local profile from Bayon Client. This action cannot be undone.</p>
-            <div className="offline-form-actions"><button type="button" onClick={() => setConfirmRemove(null)}>Cancel</button><button type="button" className="remove-confirm" onClick={() => { removeAccount(confirmRemove); setConfirmRemove(null); }}>Remove account</button></div>
+            <p>This removes the account from Bayon Client and deletes its encrypted sign-in data from this device. This action cannot be undone.</p>
+            <div className="offline-form-actions"><button type="button" onClick={() => setConfirmRemove(null)}>Cancel</button><button type="button" className="remove-confirm" onClick={() => void confirmRemoveAccount()}>Remove account</button></div>
           </div>
         </Modal>
       )}
@@ -1284,7 +1495,7 @@ function AccountsPage() {
 function PlayPage() {
   const availableVersions = useMinecraftVersions();
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('Ready to prepare launch options.');
+  const [status, setStatus] = useState('');
   const [launching, setLaunching] = useState(false);
   const settings = useSettingsStore();
   const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
@@ -1295,7 +1506,7 @@ function PlayPage() {
     if (launching) return;
     setLaunching(true);
     setProgress(5);
-    setStatus('Initialising launchâ€¦');
+    setStatus('Preparing Minecraft…');
 
     const unsubscribe = window.electronAPI?.onLaunchProgress?.((data) => {
       setProgress(data.progress);
@@ -1312,7 +1523,9 @@ function PlayPage() {
         profileName: activeProfile?.name,
         profileId: activeProfile?.id,
         username: activeAccount?.username ?? 'Player',
-                memory: settings.selectedRam,
+        accountId: activeAccount?.id,
+        accountType: activeAccount?.type ?? 'offline',
+        memory: settings.selectedRam,
         javaPath: settings.javaPath,
         customArgs: settings.customArgs,
       });
@@ -1385,13 +1598,13 @@ function PlayPage() {
             <button type="button" className="rounded-xl border border-white/10 bg-[#0f0f0f] px-4 py-2 text-sm text-white/70 transition hover:bg-white/5">Cancel</button>
             <button type="button" onClick={handleLaunchDemo} disabled={launching} className="launch-process-button">
               {launching && <span className="launch-spinner" />}
-              {launching ? `Preparing ${progress}%` : 'Prepare Launch'}
+              {launching ? `Preparing ${progress}%` : 'Launch Game'}
             </button>
           </div>
         </GlassCard>
 
         <GlassCard className="p-5">
-          <div className="mb-4 flex items-center justify-between text-white/80"><span className="font-medium">Launch Status</span><span className="text-xs uppercase tracking-[0.18em] text-white/45">Prepare only</span></div>
+          <div className="mb-4 flex items-center justify-between text-white/80"><span className="font-medium">Launch Status</span></div>
           <div className="rounded-2xl border border-white/10 bg-[#111111] p-4">
             <div className="mb-2 flex items-center justify-between text-sm text-white/70">
               <span>Selected version</span>
@@ -1408,7 +1621,7 @@ function PlayPage() {
             <div className="mt-4">
               <ProgressBar value={progress} />
             </div>
-            <div className="mt-3 text-sm text-white/60">{status}</div>
+            {status && <div className="mt-3 text-sm text-white/60">{status}</div>}
           </div>
         </GlassCard>
       </div>
@@ -1417,7 +1630,9 @@ function PlayPage() {
 }
 
 function ModsPage() {
+  const profiles = useProfileStore((state) => state.profiles);
   const activeProfileId = useProfileStore((state) => state.activeProfileId);
+  const selectProfile = useProfileStore((state) => state.selectProfile);
   const activeProfile = useProfileStore((state) => state.profiles.find((profile) => profile.id === state.activeProfileId));
   const [mods, setMods] = useState<InstalledMod[]>([]);
   const [search, setSearch] = useState('');
@@ -1428,6 +1643,7 @@ function ModsPage() {
   const [bayonModStatus, setBayonModStatus] = useState<BayonModStatus | null>(null);
   const [bayonModBusy, setBayonModBusy] = useState(false);
   const [bayonModError, setBayonModError] = useState('');
+  const [modUpdateState, setModUpdateState] = useState<Record<string, { checking: boolean; message?: string; error?: string }>>({});
 
   useEffect(() => {
     if (window.electronAPI?.getInstalledMods) {
@@ -1481,6 +1697,33 @@ function ModsPage() {
     void window.electronAPI?.openModsFolder(activeProfileId ?? undefined, projectType);
   };
 
+  const checkModUpdate = async (mod: InstalledMod) => {
+    if (!activeProfile || mod.source !== 'modrinth' || !window.electronAPI?.checkModrinthModUpdate) return;
+    setModUpdateState((current) => ({ ...current, [mod.id]: { checking: true } }));
+    try {
+      const result = await window.electronAPI.checkModrinthModUpdate({
+        projectId: mod.id,
+        profileId: activeProfile.id,
+        gameVersion: activeProfile.version,
+        loader: activeProfile.loader,
+        projectType: mod.projectType || 'mod',
+      });
+      setMods(result.mods);
+      setModUpdateState((current) => ({
+        ...current,
+        [mod.id]: {
+          checking: false,
+          message: result.updateAvailable ? `Updated to ${result.version}` : `Up to date · ${result.version}`,
+        },
+      }));
+    } catch (cause) {
+      setModUpdateState((current) => ({
+        ...current,
+        [mod.id]: { checking: false, error: cause instanceof Error ? cause.message : 'Could not check for mod updates.' },
+      }));
+    }
+  };
+
   const installBayonMod = async () => {
     if (!window.electronAPI?.installBayonMod || !activeProfile) return;
     setBayonModBusy(true);
@@ -1514,6 +1757,13 @@ function ModsPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <PageHeader title="Content Library" subtitle={activeProfile ? `${contentLabel} for ${activeProfile.name} · Minecraft ${activeProfile.version}` : 'Select a profile to manage its content'} />
           <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-white/55">
+              <span>Profile</span>
+              <select aria-label="Profile to manage mods for" value={activeProfileId ?? ''} onChange={(event) => selectProfile(event.target.value)} className="max-w-52 rounded-xl border border-white/10 bg-[#111820] px-3 py-2 text-sm text-white">
+                {!profiles.length && <option value="">No profiles</option>}
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({profile.version})</option>)}
+              </select>
+            </label>
             <button type="button" onClick={openFolder} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-sm text-white/80 transition hover:bg-white/8">
               <FolderOpen className="h-4 w-4" /> Open folder
             </button>
@@ -1588,15 +1838,22 @@ function ModsPage() {
                     <span>{projectType === 'datapack' && mod.worldName ? `World: ${mod.worldName}` : projectType === 'modpack' ? 'Modrinth pack file' : mod.loader}</span>
                   </div>
                   <div className="mt-4 flex items-center justify-between border-t border-white/6 pt-3">
-                    {mod.projectUrl ? (
-                      <button type="button" onClick={() => void window.electronAPI?.openModProject(mod.source as any, mod.projectUrl!)} className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white">
+                    {mod.projectUrl && mod.source !== 'local' ? (
+                      <button type="button" onClick={() => { if (mod.source !== 'local') void window.electronAPI?.openModProject(mod.source, mod.projectUrl!); }} className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white">
                         <Globe className="h-3.5 w-3.5" /> Project
                       </button>
                     ) : <span />}
-                    <button type="button" onClick={() => setRemoveId(mod.id)} className="flex items-center gap-1.5 text-xs text-red-300 hover:text-red-100">
-                      <Trash2 className="h-3.5 w-3.5" /> Remove
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {mod.source === 'modrinth' && <button type="button" disabled={modUpdateState[mod.id]?.checking} onClick={() => void checkModUpdate(mod)} className="flex items-center gap-1.5 text-xs text-sky-200 hover:text-sky-100 disabled:opacity-50">
+                        <RefreshCw className={`h-3.5 w-3.5 ${modUpdateState[mod.id]?.checking ? 'animate-spin' : ''}`} /> {modUpdateState[mod.id]?.checking ? 'Checking…' : 'Check version'}
+                      </button>}
+                      <button type="button" onClick={() => setRemoveId(mod.id)} className="flex items-center gap-1.5 text-xs text-red-300 hover:text-red-100">
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </button>
+                    </div>
                   </div>
+                  {modUpdateState[mod.id]?.message && <p className="mt-2 text-xs text-emerald-300" role="status">{modUpdateState[mod.id].message}</p>}
+                  {modUpdateState[mod.id]?.error && <p className="mt-2 text-xs text-red-300" role="alert">{modUpdateState[mod.id].error}</p>}
                 </div>
               </GlassCard>
             ))}
@@ -1634,6 +1891,9 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
   const [hasCurseForgeKey, setHasCurseForgeKey] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [categoriesError, setCategoriesError] = useState('');
   const [keyStatusError, setKeyStatusError] = useState('');
   const [openError, setOpenError] = useState('');
   const [installingIds, setInstallingIds] = useState<Record<string, boolean>>({});
@@ -1658,12 +1918,30 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
 
   const pageSize = source === 'curseforge' ? 20 : 25;
 
+  useEffect(() => {
+    let active = true;
+    if (source !== 'modrinth' || !window.electronAPI?.getModrinthCategories) {
+      setCategories([]);
+      return;
+    }
+    setCategoriesError('');
+    window.electronAPI.getModrinthCategories(projectType).then((items) => {
+      if (active) setCategories(items.map((item) => item.name));
+    }).catch((cause: unknown) => {
+      if (active) {
+        setCategories([]);
+        setCategoriesError(cause instanceof Error ? cause.message : 'Could not load Modrinth categories.');
+      }
+    });
+    return () => { active = false; };
+  }, [projectType, source]);
+
   const performSearch = async (targetQuery: string, targetPage: number) => {
     setLoading(true);
     setError('');
     setSearched(true);
     try {
-      const matches = await searchModCatalog({ source, query: targetQuery.trim(), gameVersion, loader, projectType, offset: targetPage * pageSize });
+      const matches = await searchModCatalog({ source, query: targetQuery.trim(), gameVersion, loader, projectType, category: selectedCategory || undefined, offset: targetPage * pageSize });
       setResults(matches);
       setHasNextPage(matches.length === pageSize);
     } catch (cause) {
@@ -1683,7 +1961,7 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
 
   useEffect(() => {
     void performSearch(query, page);
-  }, [source, gameVersion, loader, projectType, page]);
+  }, [source, gameVersion, loader, projectType, selectedCategory, page]);
 
   const installMod = async (result: ModCatalogResult) => {
     if (!window.electronAPI?.installModrinthMod) return;
@@ -1744,6 +2022,13 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
             <button type="submit" disabled={loading}>{loading ? 'Searchingâ€¦' : 'Search'}</button>
           </div>
         </form>
+        {source === 'modrinth' && <>
+          {categoriesError && <p className="mod-catalog-error" role="alert">{categoriesError}</p>}
+          <div className="modrinth-category-list" aria-label="Modrinth categories">
+            <button type="button" aria-pressed={!selectedCategory} className={!selectedCategory ? 'modrinth-category-active' : ''} onClick={() => { setSelectedCategory(''); setPage(0); }}>All categories</button>
+            {categories.map((item) => <button type="button" key={item} aria-pressed={selectedCategory === item} className={selectedCategory === item ? 'modrinth-category-active' : ''} onClick={() => { setSelectedCategory(selectedCategory === item ? '' : item); setPage(0); }}>{item.replace(/-/g, ' ')}</button>)}
+          </div>
+        </>}
         {projectType === 'datapack' && <label className="mod-world-select"><span>Install to world (optional)</span><select value={worldName} onChange={(event) => setWorldName(event.target.value)}><option value="">Save to Data Packs folder for later</option>{worlds.map((world) => <option key={world}>{world}</option>)}</select><small>If no world is selected, move the downloaded pack into a world's datapacks folder to use it.</small></label>}
         {error && <p className="mod-catalog-error" role="alert">{error}</p>}
         {openError && <p className="mod-catalog-error" role="alert">{openError}</p>}
@@ -1775,7 +2060,7 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
                           : 'border border-white/20 bg-[#202a34] text-white hover:bg-[#2b3948] active:scale-95',
                       ].join(' ')}
                     >
-                      {isInstalled ? 'Added ?' : installingIds[result.id] ? 'Downloading?' : projectType === 'modpack' ? 'Download pack' : `Add ${contentLabel.replace(/s$/, '')}`}
+                      {isInstalled ? 'Installed' : installingIds[result.id] ? 'Installing…' : projectType === 'modpack' ? 'Install pack' : `Install ${contentLabel.replace(/s$/, '')}`}
                     </button>
                   )}
                   <button type="button" className="mod-project-button" onClick={() => openProject(result)}>Open project <Globe className="h-3.5 w-3.5" /></button>
@@ -1908,20 +2193,8 @@ function SkinsPage() {
 }
 
 function DiscordPresenceSettings({ enabled, onEnabledChange }: { enabled: boolean; onEnabledChange: (enabled: boolean) => void }) {
-  const [status, setStatus] = useState<DiscordPresenceStatus>({ state: 'not-configured', message: 'Discord Rich Presence is turned off.', configured: false });
-
-  useEffect(() => {
-    const api = window.electronAPI;
-    if (!api) return;
-    const unsubscribe = api.onDiscordPresenceStatus(setStatus);
-    void api.getDiscordPresenceStatus().then(setStatus).catch(() => {});
-    return unsubscribe;
-  }, []);
-
   return <section className="discord-settings-card md:col-span-2">
     <div className="discord-settings-heading"><span className="discord-settings-icon"><Radio className="h-5 w-5" /></span><div><strong>Discord Rich Presence</strong><small>Automatically connect to Discord and show Bayon Client activity.</small></div><Toggle checked={enabled} onChange={onEnabledChange} /></div>
-    <div className={'discord-settings-connection'}><span className={'discord-status-dot discord-status-' + status.state} /><div><strong>{status.state === 'connected' ? 'Connected' : status.state === 'connecting' ? 'Connecting' : status.state === 'discord-not-running' ? 'Discord is not running' : status.state === 'error' ? 'Connection error' : enabled ? 'Starting connection' : 'Turned off'}</strong><small>{status.message}</small></div></div>
-    <p className="discord-settings-help">Keep the Discord desktop app open and enable <strong>User Settings ? Activity Privacy ? Share your activity status</strong>.</p>
   </section>;
 }
 
@@ -2041,7 +2314,7 @@ function SettingsPage({ startupSettingsError }: { startupSettingsError: string |
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <SettingRow label="Launch on startup" icon={Radio}><Toggle checked={settings.launchOnStartup} onChange={settings.setLaunchOnStartup} /></SettingRow>
             <SettingRow label="Minimize to tray" icon={Minus}><Toggle checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} /></SettingRow>
-            <p className="md:col-span-2 text-[10px] leading-relaxed text-white/45">When startup is enabled, Bayon opens hidden in the system tray after you sign in. With minimize-to-tray enabled, minimizing or closing the window keeps Bayon running; choose Quit from the tray menu to exit.</p>
+            <p className="md:col-span-2 text-[10px] leading-relaxed text-white/45">When startup is enabled, Bayon opens its window after you sign in. With minimize-to-tray enabled, minimizing or closing the window keeps Bayon running; choose Quit from the tray menu to exit.</p>
             {startupSettingsError && <p className="md:col-span-2 text-[10px] text-rose-300" role="alert">{startupSettingsError}</p>}
             <DiscordPresenceSettings enabled={settings.discordPresence} onEnabledChange={settings.setDiscordPresence} />
             <div>

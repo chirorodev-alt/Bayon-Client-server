@@ -5,22 +5,28 @@ import com.bayon.client.config.HudConfig.Widget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 import com.bayon.client.ui.BayonButton;
 import com.bayon.client.ui.BayonUi;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Glass-styled module manager, HUD layout editor and cosmetic controls. */
 public final class BayonCustomizationScreen extends Screen {
-    private static final int CARD_HEIGHT = 78;
-    private static final int CARD_GAP = 9;
+    private static final int CARD_HEIGHT = 38;
+    private static final int CARD_GAP = 5;
+    private static final Map<String, Boolean> PREVIOUS_KEY_STATES = new HashMap<>();
     private final Screen parent;
     private int page;
     private String category = "All";
+    private String selectedModule;
+    private String capturingModule;
     private String dragging;
     private double lastMouseX;
     private double lastMouseY;
@@ -35,19 +41,37 @@ public final class BayonCustomizationScreen extends Screen {
         this.page = initialPage;
     }
 
-    private int panelWidth() { return Math.min(1240, width - 28); }
-    private int panelHeight() { return Math.min(700, height - 28); }
+    private int panelWidth() { return Math.min(page == 0 ? 780 : 1240, width - 28); }
+    private int panelHeight() { return Math.min(page == 0 ? 540 : 700, height - 28); }
     private int panelLeft() { return Math.max(14, (width - panelWidth()) / 2); }
     private int panelTop() { return Math.max(14, (height - panelHeight()) / 2); }
     private int contentLeft() { return panelLeft() + 174; }
     private int contentWidth() { return panelWidth() - 194; }
-    private boolean hasPreviewPanel() { return panelWidth() >= 900; }
-    private int previewWidth() { return hasPreviewPanel() ? 304 : 0; }
-    private int cardAreaWidth() { return contentWidth() - (hasPreviewPanel() ? previewWidth() + 14 : 0); }
-    private int cardColumns() { return cardAreaWidth() >= 600 ? 2 : 1; }
-    private int cardWidth() { return (cardAreaWidth() - (cardColumns() - 1) * 9) / cardColumns(); }
-    private int cardStartY() { return panelTop() + 110; }
+    private int cardAreaWidth() { return contentWidth(); }
+    private int cardColumns() { return 1; }
+    private int cardWidth() { return cardAreaWidth(); }
+    private int cardStartY() { return panelTop() + 105; }
     public boolean showHudPreview() { return page == 3; }
+
+    public static void tickKeybinds(Minecraft client) {
+        if (client.getWindow() == null) return;
+        long window = client.getWindow().handle();
+        boolean canToggle = client.player != null && client.gui.screen() == null;
+        for (Map.Entry<String, Widget> entry : HudConfig.widgets().entrySet()) {
+            int keyCode = entry.getValue().keyCode;
+            if (keyCode == GLFW.GLFW_KEY_UNKNOWN) {
+                PREVIOUS_KEY_STATES.remove(entry.getKey());
+                continue;
+            }
+            boolean down = GLFW.glfwGetKey(window, keyCode) == GLFW.GLFW_PRESS;
+            boolean wasDown = PREVIOUS_KEY_STATES.getOrDefault(entry.getKey(), false);
+            PREVIOUS_KEY_STATES.put(entry.getKey(), down);
+            if (canToggle && down && !wasDown) {
+                entry.getValue().enabled = !entry.getValue().enabled;
+                HudConfig.save();
+            }
+        }
+    }
 
     @Override
     protected void init() {
@@ -61,15 +85,20 @@ public final class BayonCustomizationScreen extends Screen {
         addRenderableWidget(navButton("Appearance", 2, left, top));
 
         if (page == 0) {
-            String[] filters = {"All", "Combat", "Movement", "Visual", "Misc"};
+            String[] filters = {"All", "Combat", "Player", "Movement", "Render", "World", "Other"};
             int filterX = contentLeft();
             for (String filter : filters) {
-                int buttonWidth = filter.equals("Movement") ? 80 : 64;
-                addRenderableWidget(new BayonButton(filterX, top + 66, buttonWidth, 22, BayonUi.text(filter), BayonButton.Style.COMPACT, () -> {
+                int buttonWidth = switch (filter) {
+                    case "Movement" -> 64;
+                    case "Combat", "Render" -> 54;
+                    case "Player", "World", "Other" -> 48;
+                    default -> 42;
+                };
+                addRenderableWidget(new BayonButton(filterX, top + 64, buttonWidth, 21, BayonUi.text(filter), BayonButton.Style.COMPACT, () -> {
                     category = filter;
                     rebuildScreen();
                 }).selected(category.equals(filter)));
-                filterX += buttonWidth + 7;
+                filterX += buttonWidth + 4;
             }
 
             List<String> modules = filteredModules();
@@ -80,12 +109,28 @@ public final class BayonCustomizationScreen extends Screen {
                 int x = contentLeft() + column * (cardWidth() + 9);
                 int y = cardStartY() + row * (CARD_HEIGHT + CARD_GAP);
                 Widget widget = HudConfig.get(id);
-                addRenderableWidget(new BayonButton(x + cardWidth() - 58, y + 27, 48, 22, BayonUi.text(widget.enabled ? "ON" : "OFF"), BayonButton.Style.COMPACT, () -> {
+                addRenderableWidget(new BayonButton(x + cardWidth() - 78, y + 8, 44, 21,
+                        BayonUi.text(widget.enabled ? "ON" : "OFF"), BayonButton.Style.COMPACT, () -> {
                     widget.enabled = !widget.enabled;
                     HudConfig.save();
                     rebuildScreen();
                 }).selected(widget.enabled));
+                addRenderableWidget(new BayonButton(x + cardWidth() - 156, y + 8, 72, 21,
+                        BayonUi.text(capturingModule != null && capturingModule.equals(id)
+                                ? "PRESS KEY" : compactKeyName(widget.keyCode)),
+                        BayonButton.Style.COMPACT, () -> {
+                    capturingModule = id;
+                    rebuildScreen();
+                }).selected(capturingModule != null && capturingModule.equals(id)));
+                addRenderableWidget(new BayonButton(x + cardWidth() - 29, y + 8, 21, 21,
+                        BayonUi.text(">"), BayonButton.Style.COMPACT, () -> {
+                    selectedModule = id;
+                    page = 5;
+                    rebuildScreen();
+                }));
             }
+        } else if (page == 5) {
+            initModuleSettings(top);
         } else if (page == 1 || page == 4) {
             int x = contentLeft();
             addRenderableWidget(new BayonButton(x, top + 82, Math.min(420, contentWidth()), 30, BayonUi.text("Bayon Cape   -   "
@@ -114,6 +159,57 @@ public final class BayonCustomizationScreen extends Screen {
         }).selected(page == targetPage);
     }
 
+    private void initModuleSettings(int top) {
+        if (selectedModule == null || !HudConfig.widgets().containsKey(selectedModule)) {
+            page = 0;
+            return;
+        }
+        Widget widget = HudConfig.get(selectedModule);
+        int x = contentLeft();
+        addRenderableWidget(new BayonButton(x, top + 66, 76, 22, BayonUi.text("< MODULES"),
+                BayonButton.Style.SECONDARY, () -> { page = 0; rebuildScreen(); }));
+        addRenderableWidget(new BayonButton(x, top + 128, 120, 24,
+                BayonUi.text(capturingModule != null && capturingModule.equals(selectedModule)
+                        ? "PRESS A KEY" : "KEY: " + compactKeyName(widget.keyCode)),
+                BayonButton.Style.SECONDARY, () -> {
+            capturingModule = selectedModule;
+            rebuildScreen();
+        }).selected(capturingModule != null && capturingModule.equals(selectedModule)));
+        addRenderableWidget(new BayonButton(x + 130, top + 128, 72, 24,
+                BayonUi.text(widget.enabled ? "ON" : "OFF"), BayonButton.Style.COMPACT, () -> {
+            widget.enabled = !widget.enabled;
+            HudConfig.save();
+            rebuildScreen();
+        }).selected(widget.enabled));
+        addRenderableWidget(new BayonButton(x, top + 170, 36, 24, BayonUi.text("-"),
+                BayonButton.Style.COMPACT, () -> {
+            widget.scale = Math.max(0.5f, widget.scale - 0.1f);
+            HudConfig.save();
+            rebuildScreen();
+        }));
+        addRenderableWidget(new BayonButton(x + 42, top + 170, 36, 24, BayonUi.text("+"),
+                BayonButton.Style.COMPACT, () -> {
+            widget.scale = Math.min(2.0f, widget.scale + 0.1f);
+            HudConfig.save();
+            rebuildScreen();
+        }));
+    }
+
+    private static String compactKeyName(int keyCode) {
+        if (keyCode == GLFW.GLFW_KEY_UNKNOWN) return "NONE";
+        String name = com.mojang.blaze3d.platform.InputConstants.Type.KEYSYM.getOrCreate(keyCode)
+                .getDisplayName().getString();
+        return name.length() > 8 ? name.substring(0, 8) : name;
+    }
+
+    private static int widgetWidth(String id) {
+        return id.equals("keystrokes") ? 112 : 150;
+    }
+
+    private static int widgetHeight(String id) {
+        return id.equals("keystrokes") ? 78 : 48;
+    }
+
     private void rebuildScreen() {
         clearWidgets();
         init();
@@ -131,8 +227,10 @@ public final class BayonCustomizationScreen extends Screen {
         return switch (id) {
             case "cps" -> "Combat";
             case "keystrokes" -> "Movement";
-            case "ping" -> "Misc";
-            default -> "Visual";
+            case "coordinates", "armor", "effects" -> "Player";
+            case "fps", "direction" -> "Render";
+            case "ping" -> "Other";
+            default -> "Other";
         };
     }
 
@@ -180,7 +278,7 @@ public final class BayonCustomizationScreen extends Screen {
         graphics.fill(left + 164, top + 48, left + 165, bottom - 14, HudConfig.borderColor());
 
         if (page == 0) drawModuleCards(graphics);
-        if (page == 0 && hasPreviewPanel()) drawPreview(graphics, contentRight - previewWidth(), top + 110, previewWidth(), bottom - top - 152);
+        if (page == 5) drawModuleSettings(graphics, contentX, top);
         if (page == 1 || page == 4) drawCosmetics(graphics, contentX, top);
         if (page == 2) drawAppearance(graphics, contentX, top);
         if (page == 3) drawLayoutHelp(graphics, contentX, top);
@@ -189,11 +287,12 @@ public final class BayonCustomizationScreen extends Screen {
         graphics.text(Minecraft.getInstance().font, BayonUi.text("BAYON CLIENT"), left + 16, top + 16, 0xFFF5F7FC, true);
         graphics.text(Minecraft.getInstance().font, BayonUi.text("PLAY  /  CUSTOMIZE  /  BE DIFFERENT"), left + 16, top + 31, 0xFF9CBCE5, false);
 
-        String title = page == 0 ? "Module Manager" : page == 1 ? "Wardrobe" : page == 2 ? "Appearance" : page == 4 ? "Cosmetic Store" : "HUD Layout";
+        String title = page == 0 ? "Modules" : page == 1 ? "Wardrobe" : page == 2 ? "Appearance" : page == 4 ? "Cosmetic Store" : page == 5 ? "Module Settings" : "HUD Layout";
         String subtitle = page == 0 ? "Enable, disable and configure your client modules."
                 : page == 1 ? "Equip the Bayon cosmetic for your player."
                 : page == 4 ? "Cosmetics available to your Bayon profile."
                 : page == 2 ? "Set a theme and background for your client UI."
+                : page == 5 ? "Configure this HUD module and its toggle key."
                 : "Arrange and scale the HUD widgets in-game.";
         graphics.text(Minecraft.getInstance().font, BayonUi.text(title), contentX, top + 17, 0xFFF5F7FC, true);
         graphics.text(Minecraft.getInstance().font, BayonUi.text(subtitle), contentX, top + 34, 0xFF9CBCE5, false);
@@ -208,11 +307,12 @@ public final class BayonCustomizationScreen extends Screen {
             int row = index / cardColumns();
             int x = contentLeft() + column * (cardWidth() + 9);
             int y = cardStartY() + row * (CARD_HEIGHT + CARD_GAP);
-            graphics.fill(x, y, x + cardWidth(), y + CARD_HEIGHT, 0xA80C1727);
-            BayonUi.outlineRect(graphics, x, y, x + cardWidth(), y + CARD_HEIGHT, HudConfig.borderColor());
-            graphics.fill(x + 10, y + 15, x + 52, y + 58, 0xAA071222);
-            BayonUi.outlineRect(graphics, x + 10, y + 15, x + 52, y + 58, HudConfig.borderColor());
-            graphics.text(Minecraft.getInstance().font, BayonUi.text(moduleGlyph(id)), x + 23, y + 28, HudConfig.accentColor(), true);
+            int right = x + cardWidth();
+            graphics.fill(x, y, right, y + CARD_HEIGHT, 0xB80A0A0A);
+            BayonUi.outlineRect(graphics, x, y, right, y + CARD_HEIGHT, HudConfig.borderColor());
+            graphics.fill(x + 1, y + 1, x + 3, y + CARD_HEIGHT - 1, HudConfig.accentColor());
+            graphics.text(Minecraft.getInstance().font, BayonUi.text(moduleGlyph(id)), x + 10, y + 13,
+                    HudConfig.accentColor(), true);
         }
         if (modules.isEmpty()) {
             graphics.text(Minecraft.getInstance().font, BayonUi.text("No modules in this category."), contentLeft() + 8, cardStartY() + 14, 0xFFB9C6D8, false);
@@ -225,13 +325,46 @@ public final class BayonCustomizationScreen extends Screen {
             String id = modules.get(index);
             int column = index % cardColumns();
             int row = index / cardColumns();
-            int x = contentLeft() + column * (cardWidth() + 9) + 62;
+            int x = contentLeft() + column * (cardWidth() + 9) + 44;
             int y = cardStartY() + row * (CARD_HEIGHT + CARD_GAP);
-            graphics.text(Minecraft.getInstance().font, BayonUi.text(label(id)), x, y + 13, 0xFFF1F5FB, true);
-            graphics.text(Minecraft.getInstance().font, BayonUi.text(moduleCategory(id)), x + 116, y + 14, HudConfig.accentColor(), false);
-            graphics.text(Minecraft.getInstance().font, BayonUi.text(description(id)), x, y + 31, 0xFFB7C5D8, false);
-            graphics.text(Minecraft.getInstance().font, BayonUi.text("Keybind: None"), x, y + 51, 0xFF7896BA, false);
+            graphics.text(Minecraft.getInstance().font, BayonUi.text(label(id)), x, y + 5, 0xFFF1F5FB, true);
+            graphics.text(Minecraft.getInstance().font, BayonUi.text(description(id)), x, y + 20, 0xFFB7B7B7, false);
         }
+    }
+
+    private void drawModuleSettings(GuiGraphicsExtractor graphics, int x, int top) {
+        if (selectedModule == null) return;
+        Widget widget = HudConfig.get(selectedModule);
+        graphics.text(Minecraft.getInstance().font, BayonUi.text(label(selectedModule)), x, top + 98,
+                0xFFF1F5FB, true);
+        graphics.text(Minecraft.getInstance().font, BayonUi.text(description(selectedModule)), x, top + 114,
+                0xFFB7B7B7, false);
+        graphics.text(Minecraft.getInstance().font, BayonUi.text("Toggle key"), x, top + 135,
+                0xFFB7B7B7, false);
+        graphics.text(Minecraft.getInstance().font, BayonUi.text("HUD scale  " + String.format("%.1f", widget.scale)),
+                x, top + 177, 0xFFB7B7B7, false);
+        if (capturingModule != null && capturingModule.equals(selectedModule)) {
+            graphics.text(Minecraft.getInstance().font, BayonUi.text("Press a key. ESC or Backspace clears it."),
+                    x, top + 215, HudConfig.accentColor(), false);
+        }
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (capturingModule != null) {
+            Widget widget = HudConfig.get(capturingModule);
+            int keyCode = event.key();
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+                widget.keyCode = GLFW.GLFW_KEY_UNKNOWN;
+            } else if (keyCode >= 0 && keyCode <= GLFW.GLFW_KEY_LAST) {
+                widget.keyCode = keyCode;
+            }
+            capturingModule = null;
+            HudConfig.save();
+            rebuildScreen();
+            return true;
+        }
+        return super.keyPressed(event);
     }
 
     private void drawPreview(GuiGraphicsExtractor graphics, int x, int y, int w, int h) {
@@ -333,8 +466,8 @@ public final class BayonCustomizationScreen extends Screen {
         if (page == 3) {
             for (Map.Entry<String, Widget> entry : HudConfig.widgets().entrySet()) {
                 Widget widget = entry.getValue();
-                if (widget.enabled && x >= widget.x && x <= widget.x + 150 * widget.scale
-                        && y >= widget.y && y <= widget.y + 48 * widget.scale) {
+                if (widget.enabled && x >= widget.x && x <= widget.x + widgetWidth(entry.getKey()) * widget.scale
+                        && y >= widget.y && y <= widget.y + widgetHeight(entry.getKey()) * widget.scale) {
                     dragging = entry.getKey();
                     lastMouseX = x;
                     lastMouseY = y;
@@ -372,8 +505,8 @@ public final class BayonCustomizationScreen extends Screen {
         if (page == 3) {
             for (Map.Entry<String, Widget> entry : HudConfig.widgets().entrySet()) {
                 Widget widget = entry.getValue();
-                if (widget.enabled && mouseX >= widget.x && mouseX <= widget.x + 150 * widget.scale
-                        && mouseY >= widget.y && mouseY <= widget.y + 48 * widget.scale) {
+                if (widget.enabled && mouseX >= widget.x && mouseX <= widget.x + widgetWidth(entry.getKey()) * widget.scale
+                        && mouseY >= widget.y && mouseY <= widget.y + widgetHeight(entry.getKey()) * widget.scale) {
                     widget.scale = Math.max(0.5f, Math.min(2.0f, widget.scale + (scrollY > 0 ? 0.1f : -0.1f)));
                     HudConfig.save();
                     return true;

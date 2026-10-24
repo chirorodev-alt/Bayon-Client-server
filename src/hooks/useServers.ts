@@ -13,13 +13,18 @@ export function useServers(): ServersState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
-  const refresh = useCallback(() => setRefreshToken((v) => v + 1), []);
+  const refresh = useCallback(() => {
+    setError(null);
+    setLoading(true);
+    setRefreshToken((v) => v + 1);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchPartnerServers(controller.signal)
       .then((items) => {
         setServers(items);
+        setError(null);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -34,4 +39,3 @@ export function useServers(): ServersState {
 
   return { servers, loading, error, refresh };
 }
-

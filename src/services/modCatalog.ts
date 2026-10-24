@@ -19,6 +19,7 @@ export type ModSearchOptions = {
   gameVersion: string;
   loader: string;
   projectType: ModrinthProjectType;
+  category?: string;
   offset?: number;
 };
 

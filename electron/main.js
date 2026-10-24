@@ -5,19 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import http from 'node:http';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, Tray } = require('electron');
 const DiscordRPC = require('discord-rpc');
 const { autoUpdater } = require('electron-updater');
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow;
 let consoleWindow = null;
 let tray = null;
 let minimizeToTray = false;
-const launchInBackground = process.argv.includes('--hidden');
+let activeMinecraftProcess = null;
 const gameConsoleBuffer = [];
 let nextConsoleLogId = 1;
 let appUpdateState = { status: 'idle' };
@@ -28,6 +31,7 @@ let appQuitting = false;
 let discordClientId = null;
 let discordConfigPath = null;
 let customMinecraftDataRoot = null;
+const minecraftAuthControllers = new Map();
 const DEFAULT_DISCORD_CLIENT_ID = '1562436714117599323';
 const launcherStartTime = Date.now();
 let discordActivity = {
@@ -72,6 +76,13 @@ const curseForgeLoaderIds = {
 };
 
 const modrinthProjectTypes = ['mod', 'modpack', 'resourcepack', 'shader', 'datapack'];
+
+function getApplicationIconPath() {
+  const iconFile = process.platform === 'win32' ? 'bayon-icon.ico' : 'bayon-icon.png';
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'application-icons', iconFile)
+    : path.join(__dirname, '..', 'public', iconFile);
+}
 
 function assertTrustedRenderer(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) {
@@ -157,7 +168,7 @@ function startGoogleOAuth(clientId) {
   });
 }
 
-function startMicrosoftOAuth(clientId) {
+function startMicrosoftOAuth(clientId, scope = 'openid profile email User.Read', signal) {
   if (typeof clientId !== 'string' || clientId.length < 10 || clientId.length > 128) {
     return Promise.reject(new Error('Microsoft OAuth client ID is invalid.'));
   }
@@ -169,14 +180,21 @@ function startMicrosoftOAuth(clientId) {
     let settled = false;
     let timeout;
     let callbackServer;
+    let abortHandler;
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (abortHandler) signal?.removeEventListener('abort', abortHandler);
       callbackServer?.close();
       if (error) reject(error);
       else resolve(result);
     };
+    abortHandler = () => finish(new Error('Microsoft sign-in was canceled.'));
+    if (signal) {
+      signal.addEventListener('abort', abortHandler, { once: true });
+      if (signal.aborted) return abortHandler();
+    }
     callbackServer = http.createServer((request, response) => {
       const callbackUrl = new URL(request.url || '/', 'http://127.0.0.1');
       if (callbackUrl.pathname !== '/') {
@@ -213,7 +231,7 @@ function startMicrosoftOAuth(clientId) {
         redirect_uri: redirectUri,
         response_type: 'code',
         response_mode: 'query',
-        scope: 'openid profile email User.Read',
+        scope,
         state,
         code_challenge: challenge,
         code_challenge_method: 'S256',
@@ -228,6 +246,202 @@ function startMicrosoftOAuth(clientId) {
       }
     });
   });
+}
+
+const minecraftAuthHosts = new Set([
+  'login.microsoftonline.com',
+  'user.auth.xboxlive.com',
+  'xsts.auth.xboxlive.com',
+  'api.minecraftservices.com',
+]);
+
+async function requestMinecraftAuthJson(url, options = {}) {
+  const target = new URL(url);
+  if (target.protocol !== 'https:' || !minecraftAuthHosts.has(target.hostname)) {
+    throw new Error('Minecraft sign-in was blocked because an authentication URL was not trusted.');
+  }
+
+  const response = await fetch(target, { ...options, redirect: 'error' });
+  const body = await response.text();
+  let result;
+  try {
+    result = body ? JSON.parse(body) : {};
+  } catch {
+    throw new Error('An authentication service returned an invalid response.');
+  }
+  if (!response.ok) {
+    const serviceError = typeof result.error_description === 'string'
+      ? result.error_description
+      : typeof result.Message === 'string' ? result.Message : '';
+    throw new Error(serviceError.slice(0, 240) || `An authentication service returned HTTP ${response.status}.`);
+  }
+  return result;
+}
+
+async function authenticateMinecraftWithMicrosoftAccessToken(msaAccessToken, signal) {
+  const xbox = await requestMinecraftAuthJson('https://user.auth.xboxlive.com/user/authenticate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-xbl-contract-version': '1' },
+    signal,
+    body: JSON.stringify({
+      Properties: { AuthMethod: 'RPS', SiteName: 'user.auth.xboxlive.com', RpsTicket: `d=${msaAccessToken}` },
+      RelyingParty: 'http://auth.xboxlive.com',
+      TokenType: 'JWT',
+    }),
+  });
+  const xboxToken = xbox.Token;
+  const userHash = xbox.DisplayClaims?.xui?.[0]?.uhs;
+  if (typeof xboxToken !== 'string' || typeof userHash !== 'string') {
+    throw new Error('Microsoft did not return an Xbox account token.');
+  }
+
+  const xsts = await requestMinecraftAuthJson('https://xsts.auth.xboxlive.com/xsts/authorize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-xbl-contract-version': '1' },
+    signal,
+    body: JSON.stringify({
+      Properties: { SandboxId: 'RETAIL', UserTokens: [xboxToken] },
+      RelyingParty: 'rp://api.minecraftservices.com/',
+      TokenType: 'JWT',
+    }),
+  });
+  const xstsToken = xsts.Token;
+  const xstsUserHash = xsts.DisplayClaims?.xui?.[0]?.uhs;
+  if (typeof xstsToken !== 'string' || typeof xstsUserHash !== 'string') {
+    throw new Error('Xbox sign-in could not authorize this account for Minecraft.');
+  }
+
+  const minecraft = await requestMinecraftAuthJson('https://api.minecraftservices.com/authentication/login_with_xbox', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    signal,
+    body: JSON.stringify({ identityToken: `XBL3.0 x=${xstsUserHash};${xstsToken}` }),
+  });
+  if (typeof minecraft.access_token !== 'string') {
+    throw new Error('Minecraft Services did not return a Java Edition access token.');
+  }
+
+  const [entitlements, profile] = await Promise.all([
+    requestMinecraftAuthJson('https://api.minecraftservices.com/entitlements/mcstore', {
+      signal,
+      headers: { Authorization: `Bearer ${minecraft.access_token}`, Accept: 'application/json' },
+    }),
+    requestMinecraftAuthJson('https://api.minecraftservices.com/minecraft/profile', {
+      signal,
+      headers: { Authorization: `Bearer ${minecraft.access_token}`, Accept: 'application/json' },
+    }),
+  ]);
+  const ownsJava = Array.isArray(entitlements.items)
+    && entitlements.items.some((item) => ['game_minecraft', 'product_minecraft'].includes(item?.name));
+  if (!ownsJava) {
+    throw new Error('This Microsoft account does not have Minecraft Java Edition access.');
+  }
+  if (typeof profile.id !== 'string' || !/^[a-f\d]{32}$/i.test(profile.id) || typeof profile.name !== 'string' || !profile.name.trim()) {
+    throw new Error('This Microsoft account does not have a Minecraft Java profile yet.');
+  }
+
+  return {
+    id: profile.id.toLowerCase(),
+    username: profile.name,
+    minecraftAccessToken: minecraft.access_token,
+  };
+}
+
+async function authenticateMinecraftWithMicrosoft(clientId, authorization, signal) {
+  const tokenResult = await requestMinecraftAuthJson('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    signal,
+    body: new URLSearchParams({
+      client_id: clientId,
+      code: authorization.code,
+      code_verifier: authorization.codeVerifier,
+      redirect_uri: authorization.redirectUri,
+      grant_type: 'authorization_code',
+      scope: 'openid profile email XboxLive.signin offline_access',
+    }),
+  });
+  if (typeof tokenResult.access_token !== 'string' || typeof tokenResult.refresh_token !== 'string') {
+    throw new Error('Microsoft sign-in did not return the tokens required for Minecraft. Check the app registration permissions.');
+  }
+  return {
+    ...await authenticateMinecraftWithMicrosoftAccessToken(tokenResult.access_token, signal),
+    refreshToken: tokenResult.refresh_token,
+  };
+}
+
+function minecraftCredentialPath(profileId) {
+  if (typeof profileId !== 'string' || !/^[a-f\d]{32}$/i.test(profileId)) {
+    throw new Error('Invalid Minecraft profile ID.');
+  }
+  return path.join(app.getPath('userData'), 'minecraft-auth', `${profileId.toLowerCase()}.bin`);
+}
+
+function saveMinecraftCredentials(profileId, refreshToken, clientId) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Windows credential encryption is unavailable. Minecraft sign-in was not saved.');
+  }
+  if (typeof refreshToken !== 'string' || !refreshToken || typeof clientId !== 'string') {
+    throw new Error('Microsoft did not provide a refresh token. Please sign in again.');
+  }
+  const destination = minecraftCredentialPath(profileId);
+  mkdirSync(path.dirname(destination), { recursive: true });
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, safeStorage.encryptString(JSON.stringify({ refreshToken, clientId })), { flag: 'wx' });
+  try {
+    renameSync(temporary, destination);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
+function readMinecraftCredentials(profileId) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Windows credential encryption is unavailable. Sign in to Minecraft again.');
+  }
+  const filePath = minecraftCredentialPath(profileId);
+  if (!existsSync(filePath)) {
+    throw new Error('Sign in with Microsoft from Accounts before joining a partner server.');
+  }
+  try {
+    const stored = JSON.parse(safeStorage.decryptString(readFileSync(filePath)));
+    if (typeof stored.refreshToken !== 'string' || !stored.refreshToken || typeof stored.clientId !== 'string') throw new Error('Missing credentials.');
+    return stored;
+  } catch {
+    throw new Error('The saved Microsoft sign-in could not be read. Remove the account and sign in again.');
+  }
+}
+
+async function refreshMinecraftAccount(profileId) {
+  const credentials = readMinecraftCredentials(profileId);
+  const tokenResult = await requestMinecraftAuthJson('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      client_id: credentials.clientId,
+      refresh_token: credentials.refreshToken,
+      grant_type: 'refresh_token',
+      scope: 'openid profile email XboxLive.signin offline_access',
+    }),
+  });
+  if (typeof tokenResult.access_token !== 'string') {
+    throw new Error('Microsoft sign-in expired. Sign in again from Accounts.');
+  }
+
+  const minecraft = await authenticateMinecraftWithMicrosoftAccessToken(tokenResult.access_token);
+  if (minecraft.id !== profileId.toLowerCase()) {
+    throw new Error('The signed-in Microsoft account does not match the selected Minecraft account.');
+  }
+  saveMinecraftCredentials(profileId, tokenResult.refresh_token || credentials.refreshToken, credentials.clientId);
+  return {
+    access_token: minecraft.minecraftAccessToken,
+    client_token: randomUUID(),
+    uuid: minecraft.id,
+    name: minecraft.username,
+    user_properties: {},
+    meta: { type: 'msa' },
+  };
 }
 
 function publishDiscordPresenceStatus(state, message, configured = Boolean(discordClientId)) {
@@ -402,7 +616,7 @@ function validateSearchOptions(input) {
   if (!input || typeof input !== 'object') {
     throw new Error('Invalid mod search options.');
   }
-  const { source, query = '', gameVersion, loader, projectType = 'mod', offset = 0 } = input;
+  const { source, query = '', gameVersion, loader, projectType = 'mod', category, offset = 0 } = input;
   if (!['modrinth', 'curseforge'].includes(source)) {
     throw new Error('Choose Modrinth or CurseForge.');
   }
@@ -415,10 +629,13 @@ function validateSearchOptions(input) {
   if (!modrinthProjectTypes.includes(projectType)) throw new Error('Choose a supported Modrinth content type.');
   if (source === 'curseforge' && projectType !== 'mod') throw new Error('CurseForge search is available for mods only.');
   if (!Number.isInteger(offset) || offset < 0 || offset > 10000) throw new Error('Choose a valid catalog page.');
+  if (category !== undefined && (typeof category !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(category))) {
+    throw new Error('Choose a valid Modrinth category.');
+  }
   if (!Object.hasOwn(modrinthLoaderFacets, loader)) {
     throw new Error('Choose a supported mod loader.');
   }
-  return { source, query: query.trim(), gameVersion, loader, projectType, offset };
+  return { source, query: query.trim(), gameVersion, loader, projectType, category, offset };
 }
 
 function normalizeModrinthResult(item, projectType = 'mod') {
@@ -462,6 +679,7 @@ async function searchModrinth(options) {
   if (options.projectType === 'mod' || options.projectType === 'modpack') {
     facets.push([`categories:${modrinthLoaderFacets[options.loader]}`]);
   }
+  if (options.category) facets.push([`categories:${options.category}`]);
   const url = new URL('https://api.modrinth.com/v2/search');
   if (options.query) {
     url.searchParams.set('query', options.query);
@@ -1074,8 +1292,7 @@ function showMainWindow() {
 
 function createTray() {
   if (tray) return;
-  const iconPath = path.join(__dirname, '..', 'public', process.platform === 'win32' ? 'bayon-icon.ico' : 'bayon-icon.png');
-  tray = new Tray(iconPath);
+  tray = new Tray(getApplicationIconPath());
   tray.setToolTip('Bayon Client');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Bayon Client', click: showMainWindow },
@@ -1127,7 +1344,7 @@ function openGameConsole(version, profileName = 'Profile') {
     parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
     backgroundColor: '#090b0e',
     autoHideMenuBar: true,
-    icon: path.join(__dirname, '..', 'public', process.platform === 'win32' ? 'bayon-icon.ico' : 'bayon-icon.png'),
+    icon: getApplicationIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'console-preload.cjs'),
       contextIsolation: true,
@@ -1219,7 +1436,7 @@ function createWindow() {
     // DWM system backdrop on unsupported Windows builds.
     transparent: true,
     backgroundColor: '#00000000',
-    show: !launchInBackground,
+    show: true,
     titleBarStyle: 'hiddenInset',
     titleBarOverlay: false,
     autoHideMenuBar: true,
@@ -1245,7 +1462,7 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    if (!launchInBackground) showMainWindow();
+    showMainWindow();
   });
 
   mainWindow.on('close', (event) => {
@@ -1272,7 +1489,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  createTray();
+  if (!hasSingleInstanceLock) return;
   loadConfiguredDirectories();
   discordConfigPath = path.join(app.getPath('userData'), 'discord-presence.json');
 
@@ -1305,6 +1522,39 @@ app.whenReady().then(() => {
   ipcMain.handle('auth:microsoft-start', async (event, clientId) => {
     assertTrustedRenderer(event);
     return startMicrosoftOAuth(clientId);
+  });
+  ipcMain.handle('minecraft:auth-sign-in', async (event, clientId) => {
+    assertTrustedRenderer(event);
+    if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(clientId || '')) {
+      throw new Error('Microsoft Minecraft sign-in is not configured. Check the Microsoft client ID on the Bayon server.');
+    }
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('Windows credential encryption is unavailable. Microsoft sign-in cannot be stored safely.');
+    }
+    if (minecraftAuthControllers.has(event.sender.id)) throw new Error('A Microsoft Minecraft sign-in is already in progress.');
+    const controller = new AbortController();
+    minecraftAuthControllers.set(event.sender.id, controller);
+    try {
+      const authorization = await startMicrosoftOAuth(clientId, 'openid profile email XboxLive.signin offline_access', controller.signal);
+      const minecraft = await authenticateMinecraftWithMicrosoft(clientId, authorization, controller.signal);
+      saveMinecraftCredentials(minecraft.id, minecraft.refreshToken, clientId);
+      return { id: minecraft.id, username: minecraft.username };
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('Microsoft sign-in was canceled.');
+      throw error;
+    } finally {
+      if (minecraftAuthControllers.get(event.sender.id) === controller) minecraftAuthControllers.delete(event.sender.id);
+    }
+  });
+  ipcMain.handle('minecraft:auth-cancel', (event) => {
+    assertTrustedRenderer(event);
+    minecraftAuthControllers.get(event.sender.id)?.abort();
+    return { success: true };
+  });
+  ipcMain.handle('minecraft:auth-remove', (event, profileId) => {
+    assertTrustedRenderer(event);
+    rmSync(minecraftCredentialPath(profileId), { force: true });
+    return { success: true };
   });
   ipcMain.handle('app-update:check', async (event) => {
     assertTrustedRenderer(event);
@@ -1557,6 +1807,22 @@ app.whenReady().then(() => {
     return options.source === 'modrinth' ? searchModrinth(options) : searchCurseForge(options);
   });
 
+  ipcMain.handle('mods:get-modrinth-categories', async (event, projectType) => {
+    assertTrustedRenderer(event);
+    if (!modrinthProjectTypes.includes(projectType)) throw new Error('Choose a supported Modrinth content type.');
+    const response = await fetch('https://api.modrinth.com/v2/tag/category', {
+      headers: { 'User-Agent': 'BayonClient/1.0.0 (launcher category browser)' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(`Modrinth categories failed (HTTP ${response.status}).`);
+    const categories = await response.json();
+    if (!Array.isArray(categories)) throw new Error('Modrinth returned an invalid category list.');
+    return categories
+      .filter((item) => item && typeof item.name === 'string'
+        && (item.project_type === projectType || item.project_type === null || item.project_type === undefined))
+      .map((item) => ({ name: item.name, projectType: item.project_type ?? null }));
+  });
+
   ipcMain.handle('minecraft:get-versions', async (event) => {
     assertTrustedRenderer(event);
     const response = await fetch('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', {
@@ -1638,6 +1904,56 @@ app.whenReady().then(() => {
     return installModrinthMod(payload);
   });
 
+  ipcMain.handle('mods:check-modrinth-update', async (event, input) => {
+    assertTrustedRenderer(event);
+    if (!input || typeof input !== 'object'
+      || typeof input.projectId !== 'string' || !input.projectId
+      || typeof input.profileId !== 'string' || !input.profileId
+      || typeof input.gameVersion !== 'string'
+      || !modrinthProjectTypes.includes(input.projectType)
+      || !Object.hasOwn(modrinthLoaderFacets, input.loader)) {
+      throw new Error('Invalid Modrinth update check.');
+    }
+    const installedMods = readInstalledMods(input.profileId);
+    const installed = installedMods.find((mod) => mod.id === input.projectId && (mod.projectType || 'mod') === input.projectType);
+    if (!installed || installed.source !== 'modrinth') {
+      throw new Error('This Modrinth project is not installed in the selected profile.');
+    }
+    const versionUrl = new URL(`https://api.modrinth.com/v2/project/${encodeURIComponent(input.projectId)}/version`);
+    versionUrl.searchParams.set('game_versions', JSON.stringify([input.gameVersion]));
+    if (input.projectType === 'mod' || input.projectType === 'modpack') {
+      versionUrl.searchParams.set('loaders', JSON.stringify([modrinthLoaderFacets[input.loader]]));
+    }
+    const response = await fetch(versionUrl, {
+      headers: { 'User-Agent': 'BayonClient/1.0.0 (launcher content updater)' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(`Modrinth version check failed (HTTP ${response.status}).`);
+    const versions = await response.json();
+    if (!Array.isArray(versions) || versions.length === 0) {
+      throw new Error(`No compatible release was found for Minecraft ${input.gameVersion}.`);
+    }
+    const latestVersion = versions[0]?.version_number;
+    if (typeof latestVersion !== 'string') throw new Error('Modrinth returned an invalid version.');
+    if (latestVersion === installed.version) {
+      return { updateAvailable: false, version: latestVersion, mods: installedMods };
+    }
+    const updatedMods = await installModrinthMod({
+      projectId: input.projectId,
+      gameVersion: input.gameVersion,
+      loader: input.loader,
+      profileId: input.profileId,
+      projectType: input.projectType,
+      name: installed.name,
+      summary: installed.description,
+      iconUrl: installed.iconUrl,
+      projectUrl: installed.projectUrl,
+      category: installed.category,
+      worldName: installed.worldName,
+    });
+    return { updateAvailable: true, version: latestVersion, mods: updatedMods };
+  });
+
   ipcMain.handle('mods:toggle', (event, modId, enabled, profileId) => {
     assertTrustedRenderer(event);
     if (typeof modId !== 'string') throw new Error('Invalid mod ID.');
@@ -1659,8 +1975,11 @@ app.whenReady().then(() => {
   // ── Minecraft Launch ────────────────────────────────────────────────────────
   ipcMain.handle('minecraft:launch', async (event, input) => {
     assertTrustedRenderer(event);
+    if (activeMinecraftProcess && activeMinecraftProcess.exitCode === null) {
+      throw new Error('Minecraft is already running.');
+    }
 
-    const { version = '26.3', loader = 'Fabric', username = 'Player', memory = 4, profileId, profileName = 'Profile', javaPath: requestedJavaPath = '', customArgs = '' } = input ?? {};
+    const { version = '26.3', loader = 'Fabric', username = 'Player', memory = 4, profileId, profileName = 'Profile', javaPath: requestedJavaPath = '', customArgs = '', accountId, accountType = 'offline', serverAddress } = input ?? {};
     openGameConsole(version, profileName);
     let stopLogPolling = null;
 
@@ -1719,6 +2038,24 @@ app.whenReady().then(() => {
         if (existsSync(managedJavaPath)) selectedJavaPath = managedJavaPath;
       }
       const customJvmArgs = parseCustomJavaArgs(customArgs);
+      let normalizedServerAddress;
+      if (serverAddress !== undefined) {
+        if (accountType !== 'microsoft') {
+          throw new Error('Partner servers require a Microsoft-authenticated Minecraft account. Sign in from Accounts first.');
+        }
+        const inputAddress = typeof serverAddress === 'string' ? serverAddress.trim() : '';
+        const addressParts = inputAddress.split(':');
+        const hostname = addressParts[0];
+        const validHostname = hostname.length <= 253
+          && hostname.length > 0
+          && hostname.split('.').every((part) => /^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i.test(part));
+        const validPort = addressParts.length === 1
+          || (addressParts.length === 2 && /^\d{1,5}$/.test(addressParts[1]) && Number(addressParts[1]) > 0 && Number(addressParts[1]) <= 65535);
+        if (!validHostname || !validPort) {
+          throw new Error('The partner server address is invalid.');
+        }
+        normalizedServerAddress = inputAddress;
+      }
 
       // Helper: simple HTTPS GET → JSON
       const fetchJson = (url) => new Promise((resolve, reject) => {
@@ -1772,6 +2109,14 @@ app.whenReady().then(() => {
             detached: launcher.options.overrides.detached,
             windowsHide: true,
           });
+          activeMinecraftProcess = minecraft;
+          minecraft.once('spawn', () => emit(100, 'Minecraft is running.'));
+          minecraft.once('close', () => {
+            if (activeMinecraftProcess === minecraft) activeMinecraftProcess = null;
+          });
+          minecraft.once('error', () => {
+            if (activeMinecraftProcess === minecraft) activeMinecraftProcess = null;
+          });
           minecraft.stdout?.on('data', (data) => launcher.emit('data', data.toString('utf-8')));
           minecraft.stderr?.on('data', (data) => launcher.emit('data', data.toString('utf-8')));
           minecraft.on('close', (code) => launcher.emit('close', code));
@@ -1791,29 +2136,42 @@ app.whenReady().then(() => {
       });
 
       launcher.on('data', (msg) => {
-        // Minecraft stdout — game is running
         const line = String(msg);
         const level = /\b(ERROR|FATAL|Exception|failed)\b/i.test(line) ? 'error' : /\bWARN(?:ING)?\b/i.test(line) ? 'warn' : 'info';
         appendGameConsoleLog(level, level === 'error' && /mod|fabric|mixin/i.test(line) ? 'Mod Error' : 'Minecraft', line);
-        emit(100, `Game running: ${line.slice(0, 60)}`);
       });
 
       launcher.on('error', (error) => {
         appendGameConsoleLog('error', 'Launch Error', error?.stack || error?.message || String(error));
+        emit(0, `Launch failed: ${error?.message || String(error)}`);
       });
 
       launcher.on('close', (code) => {
         stopLogPolling?.();
         stopLogPolling = null;
+        activeMinecraftProcess = null;
         appendGameConsoleLog(Number(code) === 0 ? 'info' : 'error', 'Minecraft', `Game process closed with exit code ${code}.`);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('launch:progress', { progress: 0, status: `Game closed (exit ${code}).` });
         }
       });
 
-      const auth = Authenticator.getAuth(username || 'Player');
+      let auth;
+      if (accountType === 'microsoft') {
+        auth = await refreshMinecraftAccount(accountId);
+      } else if (accountType === 'offline') {
+        auth = Authenticator.getAuth(username || 'Player');
+      } else {
+        throw new Error('The selected Minecraft account type is invalid.');
+      }
 
-      await launcher.launch({
+      const versionParts = /^1\.(\d+)/.exec(version);
+      const quickPlay = normalizedServerAddress ? {
+        type: versionParts && Number(versionParts[1]) < 20 ? 'legacy' : 'multiplayer',
+        identifier: normalizedServerAddress,
+      } : undefined;
+
+      const gameProcess = await launcher.launch({
         authorization: auth,
         root: mcRoot,
         overrides: { gameDirectory },
@@ -1821,17 +2179,43 @@ app.whenReady().then(() => {
         memory: { max: `${memory}G`, min: '2G' },
         javaPath: selectedJavaPath,
         customArgs: customJvmArgs,
+        quickPlay,
       });
 
-      emit(95, 'Game process started!');
+      if (!gameProcess || typeof gameProcess.pid !== 'number') {
+        throw new Error('Minecraft did not start. Check the game console for details.');
+      }
+      if (gameProcess.exitCode !== null) {
+        throw new Error(`Minecraft exited during startup with code ${gameProcess.exitCode}.`);
+      }
+      activeMinecraftProcess = gameProcess;
+      emit(100, 'Minecraft launched successfully.');
       return { success: true };
     } catch (err) {
       stopLogPolling?.();
       stopLogPolling = null;
+      if (activeMinecraftProcess?.exitCode !== null) activeMinecraftProcess = null;
       appendGameConsoleLog('error', 'Launch Error', err?.stack || err?.message || String(err));
       emit(0, `Launch failed: ${err.message}`);
       throw err;
     }
+  });
+
+  ipcMain.handle('minecraft:is-running', (event) => {
+    assertTrustedRenderer(event);
+    return { running: Boolean(activeMinecraftProcess && activeMinecraftProcess.exitCode === null) };
+  });
+
+  ipcMain.handle('minecraft:stop', (event) => {
+    assertTrustedRenderer(event);
+    if (!activeMinecraftProcess || activeMinecraftProcess.exitCode !== null) {
+      activeMinecraftProcess = null;
+      return { success: false };
+    }
+    if (!activeMinecraftProcess.kill()) {
+      throw new Error('Minecraft could not be stopped.');
+    }
+    return { success: true };
   });
 
   ipcMain.on('window:minimize', () => {
@@ -1862,7 +2246,7 @@ app.whenReady().then(() => {
     if (!['win32', 'darwin'].includes(process.platform)) {
       throw new Error('Launch on startup is supported on Windows and macOS.');
     }
-    app.setLoginItemSettings({ openAtLogin: enabled, args: enabled ? ['--hidden'] : [] });
+    app.setLoginItemSettings({ openAtLogin: enabled, args: [] });
   });
 
   ipcMain.handle('settings:set-minimize-to-tray', (event, enabled) => {
@@ -1872,10 +2256,19 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  createTray();
   setupAutoUpdater();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow();
+  } else if (app.isReady()) {
+    createWindow();
+  }
 });
 
 app.on('window-all-closed', () => {

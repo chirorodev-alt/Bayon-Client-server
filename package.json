@@ -1,8 +1,11 @@
 {
   "name": "bayon-client",
   "productName": "Bayon Client",
+  "author": {
+    "name": "Bayon"
+  },
   "private": true,
-  "version": "1.1.6",
+  "version": "1.1.9",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -73,6 +76,14 @@
     ],
     "extraResources": [
       {
+        "from": "public/bayon-icon.ico",
+        "to": "application-icons/bayon-icon.ico"
+      },
+      {
+        "from": "public/bayon-icon.png",
+        "to": "application-icons/bayon-icon.png"
+      },
+      {
         "from": "fabric-mod/dist",
         "to": "bayon-mod",
         "filter": [
@@ -103,6 +114,7 @@
       "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
