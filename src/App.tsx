@@ -747,15 +747,7 @@ function HomePage() {
               {launching && launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
             </div>
           </div>
-          <div className="home-profile-strip" aria-label="Game profiles">
-            {profiles.map((profile) => <div key={profile.id} className={`home-profile-card ${profile.id === activeProfileId ? 'home-profile-card-active' : ''}`}>
-              <button type="button" className="home-profile-select" onClick={() => selectProfile(profile.id)} aria-pressed={profile.id === activeProfileId}>
-                <span className="home-profile-icon"><FileText className="h-4 w-4" /></span><span className="home-profile-copy"><strong>{profile.name}</strong><small>Fabric {profile.version}</small></span>
-              </button>
-              <button type="button" className="home-profile-play" aria-label={`Launch ${profile.name}`} disabled={launching || gameRunning} onClick={() => { selectProfile(profile.id); void startLaunchProcess(profile); }}><Play className="h-4 w-4 fill-current" /></button>
-            </div>)}
-            <button type="button" className="home-profile-add" onClick={() => navigate('/profiles?create=1')}><Plus className="h-5 w-5" /><span>Add a Profile</span></button>
-          </div>
+
           <div className="dashboard-avatar" aria-label={`${activeAccount?.username ?? 'Steve'} Minecraft skin`}>
             <span className="skin-nameplate">{activeAccount?.username ?? 'Steve'}</span>
             <div className="skin-aura skin-aura-back" />

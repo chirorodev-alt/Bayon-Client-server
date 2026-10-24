@@ -1410,7 +1410,7 @@ input[type='range'] {
   position: absolute;
   z-index: 4;
   left: 50%;
-  bottom: 80px;
+  bottom: 24px;
   top: auto;
   display: flex;
   width: 320px;
@@ -1809,7 +1809,7 @@ input[type='range'] {
   position: absolute;
   z-index: 1;
   left: 50%;
-  bottom: 158px;
+  bottom: 110px;
   display: grid;
   width: 210px;
   height: 245px;
@@ -4424,7 +4424,7 @@ input[type='range'] {
   .dashboard-avatar {
     left: 50%;
     right: auto;
-    bottom: 155px;
+    bottom: 105px;
     width: 185px;
     height: 220px;
     transform: translateX(-50%);
@@ -4432,11 +4432,11 @@ input[type='range'] {
   }
 
   .play-control-wrap {
-    width: 240px;
-    min-width: 240px;
-    height: 60px;
-    top: 78px;
-    bottom: auto;
+    width: 290px;
+    min-width: 280px;
+    height: 64px;
+    bottom: 20px;
+    top: auto;
   }
 
   .launch-button {
