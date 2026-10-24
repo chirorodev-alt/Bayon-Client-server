@@ -29,6 +29,9 @@ export const useAccountStore = create<AccountState>()(
       accounts: [],
       activeAccountId: null,
       createOfflineAccount: (username) => {
+        if (get().accounts.length >= 5) {
+          throw new Error('Maximum of 5 accounts reached. Remove an existing account to add another.');
+        }
         const normalized = username.trim();
         if (!/^[A-Za-z0-9_]{3,16}$/.test(normalized)) {
           throw new Error('Use 3–16 letters, numbers, or underscores.');
@@ -57,6 +60,9 @@ export const useAccountStore = create<AccountState>()(
           if (existing.type !== 'microsoft') throw new Error('This Minecraft profile ID is already used by another account.');
           set({ activeAccountId: existing.id });
           return existing;
+        }
+        if (get().accounts.length >= 5) {
+          throw new Error('Maximum of 5 accounts reached. Remove an existing account to add another.');
         }
         const account: MicrosoftAccount = {
           id: normalizedId,

@@ -39,6 +39,7 @@ import {
   ShoppingCart,
   Settings,
   Shirt,
+  ShieldCheck,
   Square,
   Trash2,
   Terminal,
@@ -316,6 +317,244 @@ function AppShell() {
   );
 }
 
+function MinecraftAccountsDropdown({ onClose }: { onClose: () => void }) {
+  const accounts = useAccountStore((state) => state.accounts);
+  const activeAccountId = useAccountStore((state) => state.activeAccountId);
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? accounts[0];
+  const selectAccount = useAccountStore((state) => state.selectAccount);
+  const removeAccount = useAccountStore((state) => state.removeAccount);
+  const createOfflineAccount = useAccountStore((state) => state.createOfflineAccount);
+  const createMicrosoftAccount = useAccountStore((state) => state.createMicrosoftAccount);
+
+  const [tab, setTab] = useState<'offline' | 'microsoft'>('offline');
+  const [nickname, setNickname] = useState('');
+  const [error, setError] = useState('');
+  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [msBusy, setMsBusy] = useState(false);
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onMinecraftDeviceCode?.((data) => {
+      setDeviceCode(data);
+    });
+    return () => unsub?.();
+  }, []);
+
+  const handleAddOffline = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (accounts.length >= 5) {
+      setError('Maximum 5 accounts allowed.');
+      return;
+    }
+    const trimmed = nickname.trim();
+    if (!trimmed) return;
+    try {
+      const created = createOfflineAccount(trimmed);
+      selectAccount(created.id);
+      setNickname('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create account');
+    }
+  };
+
+  const handleMicrosoftSignIn = async () => {
+    if (accounts.length >= 5) {
+      setError('Maximum 5 accounts allowed.');
+      return;
+    }
+    setMsBusy(true);
+    setDeviceCode(null);
+    setError('');
+    try {
+      const clientId = await getMicrosoftClientId().catch(() => null);
+      const profile = await window.electronAPI?.signInMinecraftMicrosoft(clientId || 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb');
+      if (!profile) throw new Error('Microsoft Minecraft sign-in is only available in the desktop app.');
+      createMicrosoftAccount(profile.id, profile.username);
+      setDeviceCode(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not sign in with Microsoft.');
+    } finally {
+      setMsBusy(false);
+    }
+  };
+
+  return (
+    <div className="mc-accounts-dropdown" onClick={(e) => e.stopPropagation()}>
+      <div className="mc-accounts-header">
+        <div className="flex items-center gap-2">
+          <UserRound className="h-4 w-4 text-sky-400" />
+          <strong className="mc-accounts-title">MINECRAFT ACCOUNTS</strong>
+        </div>
+        <button type="button" onClick={onClose} className="mc-accounts-close" title="Close">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {activeAccount ? (
+        <div className="mc-active-account-card">
+          <div className="mc-avatar-wrap">
+            <MinecraftAvatar username={activeAccount.username} skin={activeAccount.skin} className="mc-avatar-head" />
+            <span className="mc-avatar-online-dot" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <strong className="truncate text-sm font-bold text-white">{activeAccount.username}</strong>
+              <span className="mc-badge-pill">{activeAccount.type === 'microsoft' ? 'MICROSOFT' : 'OFFLINE'}</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-semibold text-sky-400">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>{activeAccount.type === 'microsoft' ? 'MICROSOFT PROFILE' : 'OFFLINE PROFILE'}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mc-empty-account-card">
+          <UserRound className="h-6 w-6 text-sky-400/50 mb-1" />
+          <span className="text-xs text-white/70">No active account</span>
+          <small className="text-[10px] text-white/40">Add an offline or Microsoft account below</small>
+        </div>
+      )}
+
+      <div className="mc-saved-heading">
+        <span>SAVED PROFILES ({accounts.length})</span>
+        <span className="mc-limit-tag">{accounts.length}/5</span>
+      </div>
+
+      <div className="mc-saved-list">
+        {accounts.map((account) => {
+          const isActive = account.id === (activeAccount?.id ?? '');
+          return (
+            <div
+              key={account.id}
+              className={`mc-account-row ${isActive ? 'mc-account-row-active' : ''}`}
+              onClick={() => selectAccount(account.id)}
+            >
+              <MinecraftAvatar username={account.username} skin={account.skin} className="mc-avatar-mini" />
+              <div className="min-w-0 flex-1">
+                <strong className="block truncate text-xs font-semibold text-white">{account.username}</strong>
+                {isActive ? (
+                  <span className="mc-active-dot">● Active Now</span>
+                ) : (
+                  <span className="text-[10px] text-white/40">Click to switch</span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mc-account-delete"
+                title="Remove account"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeAccount(account.id);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mc-tabs-row">
+        <button
+          type="button"
+          className={`mc-tab-btn ${tab === 'offline' ? 'mc-tab-btn-active' : ''}`}
+          onClick={() => { setTab('offline'); setError(''); }}
+        >
+          <UserRound className="h-3.5 w-3.5" />
+          <span>Offline</span>
+        </button>
+        <button
+          type="button"
+          className={`mc-tab-btn ${tab === 'microsoft' ? 'mc-tab-btn-active' : ''}`}
+          onClick={() => { setTab('microsoft'); setError(''); }}
+        >
+          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 23 23">
+            <path fill="#f35325" d="M1 1h10v10H1z" />
+            <path fill="#81bc06" d="M12 1h10v10H12z" />
+            <path fill="#05a6f0" d="M1 12h10v10H1z" />
+            <path fill="#ffba08" d="M12 12h10v10H12z" />
+          </svg>
+          <span>Microsoft</span>
+        </button>
+      </div>
+
+      {tab === 'offline' ? (
+        <form onSubmit={handleAddOffline} className="mc-add-form">
+          <div className="mc-input-wrap">
+            <UserRound className="h-3.5 w-3.5 text-white/40 shrink-0" />
+            <input
+              value={nickname}
+              onChange={(e) => { setNickname(e.target.value); setError(''); }}
+              placeholder="NickName"
+              maxLength={16}
+              disabled={accounts.length >= 5}
+              className="mc-input"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!nickname.trim() || accounts.length >= 5}
+            className="mc-add-btn"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Add</span>
+          </button>
+        </form>
+      ) : (
+        <div className="mc-ms-wrap">
+          {deviceCode ? (
+            <div className="mc-device-code-box">
+              <span className="text-[11px] text-white/70">Enter code on Microsoft sign-in:</span>
+              <div className="mc-device-code-row">
+                <code className="mc-code-text">{deviceCode.userCode}</code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(deviceCode.userCode);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="mc-code-copy-btn"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <a
+                href={deviceCode.verificationUri}
+                target="_blank"
+                rel="noreferrer"
+                className="mc-open-link"
+              >
+                Open {deviceCode.verificationUri} ↗
+              </a>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={msBusy || accounts.length >= 5}
+              onClick={handleMicrosoftSignIn}
+              className="mc-ms-sign-btn"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>{msBusy ? 'Connecting…' : 'Sign in with Microsoft'}</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {accounts.length >= 5 && (
+        <p className="mc-notice-warn">
+          Maximum 5 accounts reached. Remove an existing account to add another.
+        </p>
+      )}
+
+      {error && <p className="mc-notice-error">{error}</p>}
+    </div>
+  );
+}
+
 function TitleBar({ windowState }: { windowState: WindowState }) {
   const data = (window as Window & { electronAPI?: { minimize: () => void; maximize: () => void; close: () => void } }).electronAPI;
   const [accountOpen, setAccountOpen] = useState(false);
@@ -473,7 +712,7 @@ function TitleBar({ windowState }: { windowState: WindowState }) {
             <span className="title-select-copy"><strong>{activeAccount?.username ?? 'No account'}</strong><small>{activeAccount ? 'Minecraft profile' : 'Not signed in'}</small></span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>
-          {accountOpen && <div className="title-popover"><strong>{activeAccount?.username ?? 'No account selected'}</strong><span>{activeAccount ? 'Minecraft profile' : 'Add a Minecraft profile to continue'}</span><NavLink to="/accounts" onClick={() => setAccountOpen(false)}>Manage accounts</NavLink></div>}
+          {accountOpen && <MinecraftAccountsDropdown onClose={() => setAccountOpen(false)} />}
         </div>
         <div className="client-online-count" title="Bayon Client sessions active in the last 90 seconds" aria-label={`${onlineUsers ?? '—'} Bayon Client users online`}>
           <span className="client-online-indicator" />{onlineUsers === null ? '—' : onlineUsers.toLocaleString()} <small>{language === 'Khmer' ? 'កំពុងប្រើ' : 'online'}</small>
