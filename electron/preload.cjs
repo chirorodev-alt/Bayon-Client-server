@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   signInMinecraftMicrosoft: (clientId) => ipcRenderer.invoke('minecraft:auth-sign-in', clientId),
   cancelMinecraftMicrosoftSignIn: () => ipcRenderer.invoke('minecraft:auth-cancel'),
   removeMinecraftMicrosoftAccount: (profileId) => ipcRenderer.invoke('minecraft:auth-remove', profileId),
+  onMinecraftDeviceCode: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('minecraft:auth-device-code', listener);
+    return () => ipcRenderer.removeListener('minecraft:auth-device-code', listener);
+  },
   onAppUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('app-update:state', listener);

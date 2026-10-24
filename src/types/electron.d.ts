@@ -169,6 +169,7 @@ declare global {
       signInMinecraftMicrosoft: (clientId: string) => Promise<{ id: string; username: string }>;
       cancelMinecraftMicrosoftSignIn: () => Promise<{ success: boolean }>;
       removeMinecraftMicrosoftAccount: (profileId: string) => Promise<{ success: boolean }>;
+      onMinecraftDeviceCode: (callback: (data: { userCode: string; verificationUri: string; expiresIn: number }) => void) => () => void;
       onAppUpdateState: (callback: (state: AppUpdateState) => void) => () => void;
       onJavaRuntimeProgress: (callback: (data: JavaRuntimeProgress) => void) => () => void;
       openModProject: (source: ModCatalogSource, projectUrl: string) => Promise<void>;

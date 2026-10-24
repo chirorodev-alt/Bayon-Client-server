@@ -181,6 +181,7 @@ function startMicrosoftOAuth(clientId, scope = 'openid profile email User.Read',
     let timeout;
     let callbackServer;
     let abortHandler;
+    let redirectUri = '';
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
@@ -224,7 +225,7 @@ function startMicrosoftOAuth(clientId, scope = 'openid profile email User.Read',
     callbackServer.listen(0, 'localhost', async () => {
       const address = callbackServer.address();
       if (!address || typeof address === 'string') return finish(new Error('Could not start the local Microsoft sign-in callback.'));
-      const redirectUri = `http://localhost:${address.port}`;
+      redirectUri = `http://localhost:${address.port}`;
       const authUrl = new URL('https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize');
       authUrl.search = new URLSearchParams({
         client_id: clientId,
@@ -345,6 +346,94 @@ async function authenticateMinecraftWithMicrosoftAccessToken(msaAccessToken, sig
     username: profile.name,
     minecraftAccessToken: minecraft.access_token,
   };
+}
+
+
+async function authenticateMinecraftWithDeviceCode(clientId, onCodeReceived, signal) {
+  const deviceCodeResponse = await requestMinecraftAuthJson('https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    signal,
+    body: new URLSearchParams({
+      client_id: clientId,
+      scope: 'XboxLive.signin offline_access',
+    }),
+  });
+
+  if (!deviceCodeResponse.device_code || !deviceCodeResponse.user_code) {
+    throw new Error('Microsoft did not return a valid login code.');
+  }
+
+  const userCode = deviceCodeResponse.user_code;
+  const verificationUri = deviceCodeResponse.verification_uri || 'https://microsoft.com/link';
+  const expiresIn = deviceCodeResponse.expires_in || 900;
+  const pollIntervalMs = Math.max(2, (deviceCodeResponse.interval || 5)) * 1000;
+
+  if (typeof onCodeReceived === 'function') {
+    onCodeReceived({ userCode, verificationUri, expiresIn });
+  }
+
+  const expiresAt = Date.now() + expiresIn * 1000;
+
+  while (Date.now() < expiresAt) {
+    if (signal?.aborted) throw new Error('Microsoft sign-in was canceled.');
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, pollIntervalMs);
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          resolve();
+        }, { once: true });
+      }
+    });
+    if (signal?.aborted) throw new Error('Microsoft sign-in was canceled.');
+
+    const tokenResponse = await fetch('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      signal,
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        client_id: clientId,
+        device_code: deviceCodeResponse.device_code,
+      }),
+    });
+
+    const bodyText = await tokenResponse.text();
+    let tokenData;
+    try {
+      tokenData = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      continue;
+    }
+
+    if (tokenResponse.ok && tokenData.access_token) {
+      const minecraft = await authenticateMinecraftWithMicrosoftAccessToken(tokenData.access_token, signal);
+      return {
+        ...minecraft,
+        refreshToken: tokenData.refresh_token,
+      };
+    }
+
+    if (tokenData.error === 'authorization_pending') {
+      continue;
+    }
+    if (tokenData.error === 'slow_down') {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      continue;
+    }
+    if (tokenData.error === 'expired_token') {
+      throw new Error('Microsoft sign-in code expired. Please try again.');
+    }
+    if (tokenData.error === 'access_denied') {
+      throw new Error('Microsoft sign-in was canceled.');
+    }
+    if (tokenData.error) {
+      throw new Error(tokenData.error_description || tokenData.error);
+    }
+  }
+
+  throw new Error('Microsoft sign-in timed out. Please try again.');
 }
 
 async function authenticateMinecraftWithMicrosoft(clientId, authorization, signal) {
@@ -1525,9 +1614,9 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('minecraft:auth-sign-in', async (event, clientId) => {
     assertTrustedRenderer(event);
-    if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(clientId || '')) {
-      throw new Error('Microsoft Minecraft sign-in is not configured. Check the Microsoft client ID on the Bayon server.');
-    }
+    const effectiveClientId = (/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(clientId || ''))
+      ? clientId
+      : 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb';
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error('Windows credential encryption is unavailable. Microsoft sign-in cannot be stored safely.');
     }
@@ -1535,9 +1624,15 @@ app.whenReady().then(() => {
     const controller = new AbortController();
     minecraftAuthControllers.set(event.sender.id, controller);
     try {
-      const authorization = await startMicrosoftOAuth(clientId, 'openid profile email XboxLive.signin offline_access', controller.signal);
-      const minecraft = await authenticateMinecraftWithMicrosoft(clientId, authorization, controller.signal);
-      saveMinecraftCredentials(minecraft.id, minecraft.refreshToken, clientId);
+      const minecraft = await authenticateMinecraftWithDeviceCode(
+        effectiveClientId,
+        (info) => {
+          event.sender.send('minecraft:auth-device-code', info);
+          try { shell.openExternal(info.verificationUri); } catch {}
+        },
+        controller.signal
+      );
+      saveMinecraftCredentials(minecraft.id, minecraft.refreshToken, effectiveClientId);
       return { id: minecraft.id, username: minecraft.username };
     } catch (error) {
       if (controller.signal.aborted) throw new Error('Microsoft sign-in was canceled.');

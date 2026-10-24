@@ -6,6 +6,8 @@ import {
   Check,
   AlertTriangle,
   ChevronDown,
+  ChevronLeft,
+  Copy,
   ChevronRight,
   Coffee,
   Coins,
@@ -724,10 +726,16 @@ function HomePage() {
             <span className="sr-only" role="status">{launchStatus}</span>
             <div className="play-control-wrap">
               <button type="button" onClick={() => gameRunning ? void stopGame() : void startLaunchProcess()} className="launch-button" disabled={launching || stoppingGame}>
-                {(launching || stoppingGame) && <span className="launch-spinner" />}
-                <span><strong>{launching ? `PREPARING ${launchProgress}%` : stoppingGame ? 'STOPPING GAME' : gameRunning ? 'STOP GAME' : 'LAUNCH GAME'}</strong><small>{launchStatus !== 'Ready' && (launching || stoppingGame) ? launchStatus : `${selectedVersion} · ${selectedLoader}`}</small>{!launching && !stoppingGame && <em>Minecraft Java Edition</em>}</span>
+                {(launching || stoppingGame) ? <span className="launch-spinner" /> : <Play className="h-5 w-5 fill-current text-white shrink-0 launch-play-icon" />}
+                <div className="launch-button-content">
+                  <strong className="launch-button-title">{launching ? `PREPARING ${launchProgress}%` : stoppingGame ? 'STOPPING GAME' : gameRunning ? 'STOP GAME' : 'LAUNCH GAME'}</strong>
+                  <div className="launch-button-sub">
+                    <span className="launch-version-badge">{launchStatus !== 'Ready' && (launching || stoppingGame) ? launchStatus : `${selectedVersion} · ${selectedLoader}`}</span>
+                    {!launching && !stoppingGame && <span className="launch-edition">Java Edition</span>}
+                  </div>
+                </div>
               </button>
-              <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Choose profile version" aria-expanded={loaderMenu}><ChevronDown className="h-5 w-5" /></button>
+              <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Choose profile version" aria-expanded={loaderMenu}><ChevronDown className="h-5 w-5 transition-transform" style={{ transform: loaderMenu ? 'rotate(180deg)' : 'none' }} /></button>
               {loaderMenu && <div className="hero-dropdown profile-version-dropdown" role="menu" aria-label="Choose profile version">
                 <strong>Choose Profile Version</strong>
                 {profiles.length ? profiles.map((profile) => <button type="button" role="menuitemradio" aria-checked={profile.id === activeProfileId} className={profile.id === activeProfileId ? 'profile-version-option profile-version-option-active' : 'profile-version-option'} key={profile.id} onClick={() => { selectProfile(profile.id); setLoaderMenu(false); }}>
@@ -1290,51 +1298,38 @@ function AccountsPage() {
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [emailAccountId, setEmailAccountId] = useState<string | null>(null);
   const [emailDraft, setEmailDraft] = useState('');
-  const [microsoftIdentity, setMicrosoftIdentity] = useState(getBacoinsIdentity);
-  const [microsoftBusy, setMicrosoftBusy] = useState(false);
-  const [microsoftNotice, setMicrosoftNotice] = useState('');
   const [minecraftMicrosoftBusy, setMinecraftMicrosoftBusy] = useState(false);
   const [minecraftMicrosoftNotice, setMinecraftMicrosoftNotice] = useState('');
   const [accountQuery, setAccountQuery] = useState('');
   const [newestFirst, setNewestFirst] = useState(true);
   const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
   const [accountChoiceOpen, setAccountChoiceOpen] = useState(false);
+  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   useEffect(() => {
-    const refresh = () => setMicrosoftIdentity(getBacoinsIdentity());
-    window.addEventListener('bayon:bacoins-auth-changed', refresh);
-    return () => window.removeEventListener('bayon:bacoins-auth-changed', refresh);
+    const unsubscribe = window.electronAPI?.onMinecraftDeviceCode?.((data) => {
+      setDeviceCode(data);
+    });
+    return () => {
+      unsubscribe?.();
+    };
   }, []);
-
-  const connectMicrosoft = async () => {
-    setMicrosoftBusy(true);
-    setMicrosoftNotice('Finish signing in on Microsoft’s page. Enter any verification code there.');
-    setMinecraftMicrosoftNotice('');
-    try {
-      const selected = accounts.find((account) => account.id === activeAccountId);
-      await signInWithMicrosoft(selected ? { id: selected.id, username: selected.username } : undefined);
-      setMicrosoftIdentity(getBacoinsIdentity());
-      setMicrosoftNotice('Microsoft account connected. Bacoins will sync with the Store.');
-    } catch (cause) {
-      setMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not connect the Microsoft account.');
-    } finally {
-      setMicrosoftBusy(false);
-    }
-  };
 
   const signInMinecraftWithMicrosoft = async () => {
     setMinecraftMicrosoftBusy(true);
-    setMicrosoftNotice('');
-    setMinecraftMicrosoftNotice('Finish Microsoft sign-in in the browser window that opens.');
+    setDeviceCode(null);
+    setMinecraftMicrosoftNotice('Generating sign-in code…');
     try {
-      const clientId = await getMicrosoftClientId();
-      if (!clientId) throw new Error('Microsoft Minecraft sign-in is not configured on the Bayon server yet.');
-      const profile = await window.electronAPI?.signInMinecraftMicrosoft(clientId);
+      const clientId = await getMicrosoftClientId().catch(() => null);
+      const profile = await window.electronAPI?.signInMinecraftMicrosoft(clientId || 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb');
       if (!profile) throw new Error('Microsoft Minecraft sign-in is available in the Bayon desktop app.');
       createMicrosoftAccount(profile.id, profile.username);
-      setMinecraftMicrosoftNotice(`Minecraft account ${profile.username} is ready for online servers.`);
+      setMinecraftMicrosoftNotice(`Minecraft account ${profile.username} is ready!`);
+      setDeviceCode(null);
     } catch (cause) {
       setMinecraftMicrosoftNotice(cause instanceof Error ? cause.message : 'Could not sign in to Minecraft.');
+      setDeviceCode(null);
     } finally {
       setMinecraftMicrosoftBusy(false);
     }
@@ -1357,6 +1352,8 @@ function AccountsPage() {
   };
 
   const cancelMinecraftSignIn = async () => {
+    setDeviceCode(null);
+    setMinecraftMicrosoftBusy(false);
     try {
       await window.electronAPI?.cancelMinecraftMicrosoftSignIn();
     } catch (cause) {
@@ -1398,7 +1395,7 @@ function AccountsPage() {
           <PageHeader title="Accounts" subtitle="Manage your Minecraft profiles and secure Bayon account connections." />
           <button type="button" className="launch-process-button" onClick={() => setAccountChoiceOpen(true)}><Plus className="h-4 w-4" /> Add Account</button>
         </div>
-        {(microsoftNotice || minecraftMicrosoftNotice) && <div className="account-auth-notice" role="status"><KeyRound className="h-4 w-4" /><span>{minecraftMicrosoftNotice || microsoftNotice}{!minecraftMicrosoftNotice && microsoftIdentity?.email && <> <strong>{microsoftIdentity.email}</strong></>}</span>{minecraftMicrosoftBusy && <button type="button" className="account-auth-cancel" onClick={() => void cancelMinecraftSignIn()}>Cancel sign-in</button>}</div>}
+        {minecraftMicrosoftNotice && <div className="account-auth-notice" role="status"><KeyRound className="h-4 w-4" /><span>{minecraftMicrosoftNotice}</span>{minecraftMicrosoftBusy && <button type="button" className="account-auth-cancel" onClick={() => void cancelMinecraftSignIn()}>Cancel sign-in</button>}</div>}
         <section className="account-list-section">
           <div className="account-list-heading"><div><h2>Your Accounts</h2><p>{accounts.length} local {accounts.length === 1 ? 'account' : 'accounts'} saved on this device</p></div></div>
           <div className="account-toolbar">
@@ -1448,13 +1445,51 @@ function AccountsPage() {
             <span><strong>{minecraftMicrosoftBusy ? 'Signing in…' : 'Microsoft Minecraft account'}</strong><small>Sign in with Microsoft and verify Minecraft Java ownership for online partner servers.</small></span>
             <ChevronRight className="h-4 w-4" />
           </button>
-          <button type="button" className="account-choice-option" disabled={microsoftBusy} onClick={() => { setAccountChoiceOpen(false); void connectMicrosoft(); }}>
-            <span className="account-choice-icon"><Coins className="h-5 w-5" /></span>
-            <span><strong>{microsoftBusy ? 'Connecting…' : 'Connect Bayon account'}</strong><small>Link Microsoft to Bayon for Bacoins and cosmetic sync. Sign in on Microsoft's page and enter any verification code there; this is separate from Minecraft sign-in.</small></span>
-            <ChevronRight className="h-4 w-4" />
-          </button>
+
         </div>
       </Modal>}
+      {deviceCode && (
+        <Modal title="Microsoft Minecraft Sign-in" onClose={() => void cancelMinecraftSignIn()}>
+          <div className="device-code-container">
+            <p className="device-code-instructions">
+              To sign in, open the link in your browser and enter this code:
+            </p>
+            <div className="device-code-card">
+              <span className="device-code-value">{deviceCode.userCode}</span>
+              <button
+                type="button"
+                className="device-code-copy-btn"
+                onClick={() => {
+                  navigator.clipboard.writeText(deviceCode.userCode);
+                  setCodeCopied(true);
+                  setTimeout(() => setCodeCopied(false), 2000);
+                }}
+              >
+                {codeCopied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                <span>{codeCopied ? 'Copied!' : 'Copy Code'}</span>
+              </button>
+            </div>
+            <div className="device-code-link-row">
+              <a
+                href={deviceCode.verificationUri}
+                target="_blank"
+                rel="noreferrer"
+                className="device-code-link"
+              >
+                <Globe className="h-4 w-4" />
+                <span>Open {deviceCode.verificationUri}</span>
+              </a>
+            </div>
+            <div className="device-code-status">
+              <span className="launch-spinner" />
+              <span>Waiting for you to complete sign-in in your browser…</span>
+            </div>
+            <div className="offline-form-actions">
+              <button type="button" onClick={() => void cancelMinecraftSignIn()}>Cancel</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {createOpen && (
         <Modal title="Create offline account" onClose={() => setCreateOpen(false)}>
           <form className="offline-account-form" onSubmit={submit}>
@@ -2070,12 +2105,26 @@ function AddModModal({ onClose, installedMods, onModsChange, profileId = 'defaul
           })}
           {!loading && !error && searched && results.length === 0 && <div className="mod-catalog-empty">No matching {contentLabel.toLowerCase()} for Minecraft {gameVersion}{projectType === 'mod' || projectType === 'modpack' ? ` ? ${loader}` : ''}.</div>}
           {!loading && !searched && <div className="mod-catalog-empty">Search Modrinth for {contentLabel.toLowerCase()}.</div>}
-          {!loading && searched && !error && (page > 0 || hasNextPage) && <nav className="mod-catalog-pagination" aria-label="Catalog pages">
-            <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>Previous</button>
-            <span>Page {page + 1}</span>
-            <button type="button" onClick={() => setPage((current) => current + 1)} disabled={!hasNextPage}>Next</button>
-          </nav>}
         </div>
+        {!loading && searched && !error && (page > 0 || hasNextPage) && (
+          <nav className="mod-catalog-pagination" aria-label="Catalog pages">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={page === 0}
+            >
+              <ChevronLeft className="h-4 w-4" /> Previous
+            </button>
+            <span className="mod-pagination-badge">Page {page + 1}</span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={!hasNextPage}
+            >
+              Next <ChevronRight className="h-4 w-4" />
+            </button>
+          </nav>
+        )}
       </div>
     </Modal>
   );
