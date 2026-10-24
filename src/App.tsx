@@ -722,31 +722,7 @@ function HomePage() {
       <section className="dashboard-main">
         <div className="dashboard-hero">
           <div className="hero-overlay" />
-          <div className="hero-copy">
-            <span className="sr-only" role="status">{launchStatus}</span>
-            <div className="play-control-wrap">
-              <button type="button" onClick={() => gameRunning ? void stopGame() : void startLaunchProcess()} className="launch-button" disabled={launching || stoppingGame}>
-                {(launching || stoppingGame) ? <span className="launch-spinner" /> : <Play className="h-5 w-5 fill-current text-white shrink-0 launch-play-icon" />}
-                <div className="launch-button-content">
-                  <strong className="launch-button-title">{launching ? `PREPARING ${launchProgress}%` : stoppingGame ? 'STOPPING GAME' : gameRunning ? 'STOP GAME' : 'LAUNCH GAME'}</strong>
-                  <div className="launch-button-sub">
-                    <span className="launch-version-badge">{launchStatus !== 'Ready' && (launching || stoppingGame) ? launchStatus : `${selectedVersion} · ${selectedLoader}`}</span>
-                    {!launching && !stoppingGame && <span className="launch-edition">Java Edition</span>}
-                  </div>
-                </div>
-              </button>
-              <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Choose profile version" aria-expanded={loaderMenu}><ChevronDown className="h-5 w-5 transition-transform" style={{ transform: loaderMenu ? 'rotate(180deg)' : 'none' }} /></button>
-              {loaderMenu && <div className="hero-dropdown profile-version-dropdown" role="menu" aria-label="Choose profile version">
-                <strong>Choose Profile Version</strong>
-                {profiles.length ? profiles.map((profile) => <button type="button" role="menuitemradio" aria-checked={profile.id === activeProfileId} className={profile.id === activeProfileId ? 'profile-version-option profile-version-option-active' : 'profile-version-option'} key={profile.id} onClick={() => { selectProfile(profile.id); setLoaderMenu(false); }}>
-                  <span><strong>{profile.name}</strong><small>Minecraft {profile.version} · {profile.loader}</small></span>
-                  {profile.id === activeProfileId && <Check className="h-4 w-4" />}
-                </button>) : <span className="profile-version-empty">No profiles yet.</span>}
-                <button type="button" className="profile-version-create" onClick={() => { setLoaderMenu(false); navigate('/profiles?create=1'); }}><Plus className="h-3.5 w-3.5" /> Create Profile</button>
-              </div>}
-              {launching && launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
-            </div>
-          </div>
+          <span className="sr-only" role="status">{launchStatus}</span>
 
           <div className="dashboard-avatar" aria-label={`${activeAccount?.username ?? 'Steve'} Minecraft skin`}>
             <span className="skin-nameplate">{activeAccount?.username ?? 'Steve'}</span>
@@ -759,6 +735,29 @@ function HomePage() {
                 <SkinModelPreview imageUrl={activeAccount?.skin?.imageUrl} skinName={activeAccount?.skin?.name ?? 'Default'} rotation={0} slimArms={false} onRotationChange={() => {}} autoRotate />
               </Suspense>
             </div>
+          </div>
+
+          <div className="play-control-wrap">
+            <button type="button" onClick={() => gameRunning ? void stopGame() : void startLaunchProcess()} className="launch-button" disabled={launching || stoppingGame}>
+              {(launching || stoppingGame) ? <span className="launch-spinner" /> : <Play className="h-5 w-5 fill-current text-white shrink-0 launch-play-icon" />}
+              <div className="launch-button-content">
+                <strong className="launch-button-title">{launching ? `PREPARING ${launchProgress}%` : stoppingGame ? 'STOPPING GAME' : gameRunning ? 'STOP GAME' : 'LAUNCH GAME'}</strong>
+                <div className="launch-button-sub">
+                  <span className="launch-version-badge">{launchStatus !== 'Ready' && (launching || stoppingGame) ? launchStatus : `${selectedVersion} · ${selectedLoader}`}</span>
+                  {!launching && !stoppingGame && <span className="launch-edition">Java Edition</span>}
+                </div>
+              </div>
+            </button>
+            <button type="button" onClick={() => setLoaderMenu(!loaderMenu)} className="launch-caret" aria-label="Choose profile version" aria-expanded={loaderMenu}><ChevronDown className="h-5 w-5 transition-transform" style={{ transform: loaderMenu ? 'rotate(180deg)' : 'none' }} /></button>
+            {loaderMenu && <div className="hero-dropdown profile-version-dropdown" role="menu" aria-label="Choose profile version">
+              <strong>Choose Profile Version</strong>
+              {profiles.length ? profiles.map((profile) => <button type="button" role="menuitemradio" aria-checked={profile.id === activeProfileId} className={profile.id === activeProfileId ? 'profile-version-option profile-version-option-active' : 'profile-version-option'} key={profile.id} onClick={() => { selectProfile(profile.id); setLoaderMenu(false); }}>
+                <span><strong>{profile.name}</strong><small>Minecraft {profile.version} · {profile.loader}</small></span>
+                {profile.id === activeProfileId && <Check className="h-4 w-4" />}
+              </button>) : <span className="profile-version-empty">No profiles yet.</span>}
+              <button type="button" className="profile-version-create" onClick={() => { setLoaderMenu(false); navigate('/profiles?create=1'); }}><Plus className="h-3.5 w-3.5" /> Create Profile</button>
+            </div>}
+            {launching && launchProgress > 0 && <div className="home-launch-progress" role="progressbar" aria-valuenow={launchProgress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${launchProgress}%` }} /></div>}
           </div>
         </div>
 

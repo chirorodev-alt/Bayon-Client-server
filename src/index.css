@@ -1,3 +1,5 @@
+@import url('https://fonts.cdnfonts.com/css/minecraft-4');
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Silkscreen:wght@400;700&display=swap');
 @import 'tailwindcss';
 
 :root {
@@ -989,7 +991,7 @@ input[type='range'] {
 .dashboard-hero {
   position: relative;
   display: flex;
-  min-height: 430px;
+  min-height: 480px;
   overflow: hidden;
   align-items: center;
   border-bottom: 1px solid #17212c;
@@ -1809,7 +1811,7 @@ input[type='range'] {
   position: absolute;
   z-index: 1;
   left: 50%;
-  bottom: 110px;
+  bottom: 115px;
   display: grid;
   width: 210px;
   height: 245px;
@@ -1820,26 +1822,27 @@ input[type='range'] {
 
 .skin-nameplate {
   position: absolute;
-  z-index: 5;
-  top: 8px;
+  z-index: 10;
+  top: 6px;
   left: 50%;
-  max-width: 190px;
+  transform: translate(-50%, -50%);
+  max-width: 220px;
   overflow: hidden;
-  border: 2px solid rgba(219, 237, 250, .42);
   border-radius: 2px;
-  background: rgba(7, 13, 20, .9);
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, .4), inset 0 1px rgba(255, 255, 255, .12);
-  padding: 5px 10px;
-  color: #f3f8fc;
-  font-family: 'Minecraft', 'Minecraftia', 'Press Start 2P', 'Courier New', monospace;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: .04em;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 4px 8px 3px;
+  color: #ffffff;
+  font-family: 'Minecraft', 'Minecraftia', 'Silkscreen', 'Press Start 2P', monospace;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-shadow: 2px 2px 0px #3f3f3f, 2px 2px 0px rgba(0, 0, 0, 0.6);
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transform: translate(-50%, -50%);
-  backdrop-filter: blur(10px);
-  text-shadow: 1px 1px 0 rgba(0, 0, 0, .8);
+  pointer-events: none;
+  border: none;
+  box-shadow: none;
 }
 
 .home-skin-preview {
@@ -4406,7 +4409,7 @@ input[type='range'] {
   }
 
   .dashboard-hero {
-    min-height: 430px;
+    min-height: 480px;
   }
 
   .hero-copy {
@@ -4424,7 +4427,7 @@ input[type='range'] {
   .dashboard-avatar {
     left: 50%;
     right: auto;
-    bottom: 105px;
+    bottom: 115px;
     width: 185px;
     height: 220px;
     transform: translateX(-50%);
@@ -4435,7 +4438,7 @@ input[type='range'] {
     width: 290px;
     min-width: 280px;
     height: 64px;
-    bottom: 20px;
+    bottom: 24px;
     top: auto;
   }
 
