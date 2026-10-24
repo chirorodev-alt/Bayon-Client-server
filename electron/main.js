@@ -2189,6 +2189,31 @@ app.whenReady().then(() => {
 
         launchVersion.custom = profileId;
         emit(40, 'Fabric profile ready.');
+      } else if (loader === 'Quilt') {
+        emit(10, 'Fetching Quilt loader versions…');
+        const loaderList = await fetchJson(`https://meta.quiltmc.org/v3/versions/loader/${encodeURIComponent(version)}`);
+        if (!Array.isArray(loaderList) || loaderList.length === 0) {
+          throw new Error(`No Quilt loader found for Minecraft ${version}.`);
+        }
+        const loaderVersion = loaderList[0].loader.version;
+        const profileId = `quilt-loader-${loaderVersion}-${version}`;
+
+        emit(25, `Installing Quilt ${loaderVersion} for ${version}…`);
+        const profileDir = path.join(mcRoot, 'versions', profileId);
+        const profileJsonPath = path.join(profileDir, `${profileId}.json`);
+
+        if (!fs.existsSync(profileJsonPath)) {
+          fs.mkdirSync(profileDir, { recursive: true });
+          const profileJson = await fetchJson(
+            `https://meta.quiltmc.org/v3/versions/loader/${encodeURIComponent(version)}/${encodeURIComponent(loaderVersion)}/profile/json`
+          );
+          fs.writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2), 'utf8');
+        }
+
+        launchVersion.custom = profileId;
+        emit(40, 'Quilt profile ready.');
+      } else if (loader === 'Vanilla') {
+        emit(40, `Vanilla Minecraft ${version} ready.`);
       }
 
       emit(50, 'Starting Minecraft…');

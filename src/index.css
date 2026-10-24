@@ -4603,3 +4603,191 @@ input[type='range'] {
   color: rgba(200, 220, 240, .75);
   font-size: 12px;
 }
+
+/* Custom Refresh Partner Server Buttons */
+.partner-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(86, 172, 255, 0.35);
+  background: linear-gradient(135deg, rgba(18, 38, 62, 0.95) 0%, rgba(13, 24, 38, 0.98) 100%);
+  color: #e4f2fe;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.partner-refresh-btn:hover:not(:disabled) {
+  border-color: rgba(125, 195, 255, 0.7);
+  background: linear-gradient(135deg, rgba(25, 52, 85, 0.95) 0%, rgba(16, 32, 50, 0.98) 100%);
+  box-shadow: 0 6px 22px rgba(45, 140, 240, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-1.5px);
+  color: #ffffff;
+}
+
+.partner-refresh-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.partner-refresh-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.partner-refresh-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(56, 160, 255, 0.22);
+  border: 1px solid rgba(110, 190, 255, 0.4);
+  color: #8cd0ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rail-refresh-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(130, 180, 230, 0.2);
+  background: rgba(15, 25, 36, 0.65);
+  color: rgba(220, 235, 250, 0.75);
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.rail-refresh-btn:hover:not(:disabled) {
+  border-color: rgba(110, 190, 255, 0.6);
+  background: rgba(25, 45, 68, 0.85);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(56, 160, 255, 0.35);
+  transform: rotate(35deg);
+}
+
+.profile-loader-select {
+  height: 40px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #111820;
+  padding: 0 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 150ms ease;
+}
+
+.profile-loader-select:hover {
+  border-color: rgba(120, 190, 255, 0.45);
+}
+
+.profile-loader-select:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.profile-bg-popover {
+  position: absolute;
+  z-index: 30;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 60px);
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(143, 195, 240, 0.25);
+  background: rgba(10, 17, 26, 0.97);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 24px rgba(45, 140, 240, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.profile-bg-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #e2eaf2;
+}
+
+.profile-bg-popover-header button {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a0b5c8;
+}
+
+.profile-bg-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.profile-bg-thumb {
+  position: relative;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.profile-bg-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-bg-thumb span {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: 8px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.profile-bg-thumb:hover {
+  border-color: rgba(120, 190, 255, 0.7);
+  transform: scale(1.05);
+}
+
+.profile-bg-thumb-active {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4);
+}
+
+.profile-bg-input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #121820;
+  padding: 7px 10px;
+  font-size: 11px;
+  color: #fff;
+  outline: none;
+}
+
+.profile-bg-input:focus {
+  border-color: #38bdf8;
+}

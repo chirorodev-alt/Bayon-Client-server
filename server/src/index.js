@@ -992,8 +992,8 @@ app.post('/api/admin/users/:id/bacoins', requireAdmin, (req, res) => {
 });
 app.post('/api/admin/assets', requireAdmin, (req, res) => {
   const { fileName, mimeType, base64 } = req.body || {};
-  const allowed = { 'model/gltf-binary': '.glb', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
-  if (!allowed[mimeType] || typeof base64 !== 'string' || base64.length > 16_800_000) return res.status(400).json({ error: 'Upload a GLB model or PNG, JPG, or WEBP image smaller than 12 MB.' });
+  const allowed = { 'model/gltf-binary': '.glb', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' };
+  if (!allowed[mimeType] || typeof base64 !== 'string' || base64.length > 16_800_000) return res.status(400).json({ error: 'Upload a GLB model or PNG, JPG, WEBP, or GIF image smaller than 12 MB.' });
   const bytes = Buffer.from(base64, 'base64');
   if (!bytes.length || bytes.length > 12 * 1024 * 1024 || (mimeType === 'model/gltf-binary' && bytes.subarray(0, 4).toString() !== 'glTF')) return res.status(400).json({ error: 'The uploaded file is invalid or too large.' });
   const id = crypto.randomBytes(16).toString('hex');

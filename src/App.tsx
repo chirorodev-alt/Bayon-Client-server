@@ -57,7 +57,7 @@ import { searchModCatalog, type ModCatalogResult, type ModCatalogSource, type Mo
 import { clearBacoinsToken, equipCosmetic, fetchBacoinsMe, fetchCosmetics, getBacoinsIdentity, getBacoinsToken, getMicrosoftClientId, purchaseCosmetic, redeemBacoinsCode, signInWithMicrosoft, type BacoinsUser, type Cosmetic } from './services/bacoinsApi';
 import { useAccountStore } from './store/useAccountStore';
 import { useSettingsStore } from './store/useSettingsStore';
-import { useProfileStore, type VersionProfile } from './store/useProfileStore';
+import { useProfileStore, type VersionProfile, PROFILE_BACKGROUND_PRESETS } from './store/useProfileStore';
 import type { AppUpdateState, BayonModStatus, ClientDirectories, InstalledMod, JavaRuntimeProgress, ManagedJavaRuntime } from './types/electron';
 import bayonIcon from './assets/bayon-icon.png';
 import { BACKEND_BASE_URL } from './services/backendConfig';
@@ -115,7 +115,13 @@ const navigationLabels = {
   Khmer: ['\u179B\u17C1\u1784', 'ម៉ាស៊ីនមេដៃគូ', '\u1794\u17D2\u179A\u17BC\u179F\u17C0\u179B', '\u1798\u17C9\u17BC\u178A', '\u179F\u17D2\u1794\u17C2\u1780', '\u17A0\u17B6\u1784', '\u1780\u17B6\u179A\u1780\u17C6\u178E\u178F\u17CB'],
 } as const;
 
-const versions = ['26.3', '26.2'];
+const versions = [
+  '1.21.4', '1.21.3', '1.21.1', '1.21',
+  '1.20.6', '1.20.4', '1.20.2', '1.20.1', '1.20',
+  '1.19.4', '1.19.2', '1.18.2', '1.17.1',
+  '1.16.5', '1.15.2', '1.14.4', '1.12.2', '1.8.9', '1.7.10',
+  '26.3', '26.2'
+];
 const modContentTabs: { id: ModrinthProjectType; label: string }[] = [
   { id: 'mod', label: 'Mods' },
   { id: 'modpack', label: 'Modpacks' },
@@ -138,7 +144,7 @@ function useMinecraftVersions() {
           return (manifest.versions ?? []).filter((version) => version.type === 'release').map((version) => version.id);
         });
       minecraftVersionsRequest = request
-        .then((items) => ['26.3', '26.2', ...items].filter((item, index, list) => list.indexOf(item) === index))
+        .then((items) => [...items, '26.3', '26.2'].filter((item, index, list) => list.indexOf(item) === index))
         .catch(() => versions);
     }
     void minecraftVersionsRequest.then((items) => { if (active) setAvailableVersions(items); });
@@ -720,7 +726,7 @@ function HomePage() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22 }} className="dashboard-layout">
       <section className="dashboard-main">
-        <div className="dashboard-hero">
+        <div className="dashboard-hero" style={{ backgroundImage: `url(${activeProfile?.background || '/minecraft-hero-background.png'})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
           <div className="hero-overlay" />
           <span className="sr-only" role="status">{launchStatus}</span>
 
@@ -781,7 +787,19 @@ function HomePage() {
       <aside className="dashboard-rail">
         <button type="button" className="rail-panel store-panel" onClick={() => navigate('/store')}><ShoppingCart className="h-6 w-6" /><span><strong>Store</strong><small>Bacoins &amp; Cosmetics</small></span><ChevronRight className="ml-auto h-4 w-4" /></button>
         <section className="rail-panel servers-panel">
-          <div className="rail-heading"><h2>Partner Servers</h2></div>
+          <div className="rail-heading">
+            <h2>Partner Servers</h2>
+            <button
+              type="button"
+              className="rail-refresh-btn"
+              onClick={serversState.refresh}
+              disabled={serversState.loading}
+              title="Refresh partner servers"
+              aria-label="Refresh partner servers"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${serversState.loading ? 'animate-spin text-sky-400' : ''}`} />
+            </button>
+          </div>
           {serversState.loading ? (
             <div className="rail-empty-state"><strong>Loading serversâ€¦</strong><span>Fetching live partner directory.</span></div>
           ) : serversState.error ? (
@@ -796,9 +814,9 @@ function HomePage() {
             serversState.servers.map((server) => (
               <div className="server-row" key={server.id} title={`${server.name} â€” ${server.address}`}>
                 <div className={`server-icon ${server.color || 'server-blue'}`}>
-                  {server.icon && (server.icon.startsWith('data:') || server.icon.startsWith('http')) ? (
+                  {server.icon && (server.icon.startsWith('data:') || server.icon.startsWith('http') || server.icon.startsWith('/')) ? (
                     <img
-                      src={server.icon}
+                      src={server.icon.startsWith('/') ? `${BACKEND_BASE_URL}${server.icon}` : server.icon}
                       alt={server.name}
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).src = `https://eu.mc-api.net/v3/server/favicon/${encodeURIComponent(server.address)}`;
@@ -1012,7 +1030,17 @@ function PartnerServersPage() {
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="partner-servers-page page-scroll p-6">
       <div className="partner-servers-heading">
         <PageHeader title="Partner Servers" subtitle="Choose a server to launch Minecraft and connect directly." />
-        <button type="button" className="account-select-button" onClick={serversState.refresh}><RefreshCw className="h-4 w-4" /> Refresh</button>
+        <button
+          type="button"
+          className="partner-refresh-btn"
+          onClick={serversState.refresh}
+          disabled={serversState.loading}
+          title="Refresh live partner servers"
+        >
+          <RefreshCw className={`h-4 w-4 ${serversState.loading ? 'animate-spin text-sky-300' : ''}`} />
+          <span>{serversState.loading ? 'Refreshing…' : 'Refresh Servers'}</span>
+          <span className="partner-refresh-badge">{serversState.servers.length}</span>
+        </button>
       </div>
       {activeAccount?.type !== 'microsoft' && <div className="partner-auth-notice"><KeyRound className="h-4 w-4" /><span>Online partner servers require a Microsoft account with Minecraft Java ownership.</span><button type="button" onClick={() => navigate('/accounts')}>Sign in</button></div>}
       {status && <p className="partner-launch-status" role="status">{status}</p>}
@@ -1021,7 +1049,7 @@ function PartnerServersPage() {
       {!serversState.loading && !serversState.error && serversState.servers.length === 0 && <div className="partner-server-empty"><strong>No partner servers yet</strong><span>Check again later for servers added by Bayon.</span></div>}
       <div className="partner-server-grid">
         {serversState.servers.map((server) => {
-          const iconUrl = typeof server.icon === 'string' && server.icon.toLowerCase().startsWith('https://') ? server.icon : '';
+          const iconUrl = typeof server.icon === 'string' && (server.icon.startsWith('http') || server.icon.startsWith('/') || server.icon.startsWith('data:')) ? (server.icon.startsWith('/') ? `${BACKEND_BASE_URL}${server.icon}` : server.icon) : '';
           const playerCount = server.formattedCount || (
             typeof server.onlinePlayers === 'number' && typeof server.maxPlayers === 'number'
               ? `${server.onlinePlayers.toLocaleString()} / ${server.maxPlayers.toLocaleString()}`
@@ -1207,14 +1235,16 @@ function ProfilesPage() {
   const selectProfile = useProfileStore((state) => state.selectProfile);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [version, setVersion] = useState('26.3');
+  const [version, setVersion] = useState('1.21.4');
+  const [loader, setLoader] = useState('Fabric');
+  const [background, setBackground] = useState('/minecraft-hero-background.png');
 
   useEffect(() => { if (new URLSearchParams(location.search).get('create') === '1') setCreating(true); }, [location.search]);
 
   const createProfile = (event: React.FormEvent) => {
     event.preventDefault();
     const profileName = name.trim() || `Minecraft ${version}`;
-    const profile = createProfileInStore(profileName, version);
+    const profile = createProfileInStore(profileName, version, loader, background);
     selectProfile(profile.id);
     setName('');
     setCreating(false);
@@ -1222,53 +1252,57 @@ function ProfilesPage() {
 
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-scroll p-6">
     <div className="mx-auto max-w-6xl">
-      <div className="mb-6 flex items-center justify-between gap-4"><PageHeader title="Profiles" subtitle="Create and configure Minecraft versions and launch modes." /><PrimaryButton onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Create version</PrimaryButton></div>
+      <div className="mb-6 flex items-center justify-between gap-4"><PageHeader title="Profiles" subtitle="Create and configure Minecraft versions, mod loaders, and profile backgrounds." /><PrimaryButton onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Create version</PrimaryButton></div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {profiles.map((profile) => <VersionProfileCard key={profile.id} profile={profile} availableVersions={availableVersions} active={profile.id === activeProfileId} onSelect={() => selectProfile(profile.id)} onUpdate={(updates) => updateProfile(profile.id, updates)} onRemove={() => removeProfile(profile.id)} />)}
         <button type="button" onClick={() => setCreating(true)} className="profile-create-card group">
           <span className="profile-create-icon"><Plus className="h-7 w-7 transition-transform duration-200 group-hover:rotate-90" /></span>
           <strong>Create profile</strong>
-          <small>Add another isolated Minecraft version</small>
+          <small>Add another isolated Minecraft version & loader</small>
         </button>
       </div>
-      {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreating(false); }}><form onSubmit={createProfile} className="w-full max-w-md rounded-xl border border-white/10 bg-[#0e141b] p-5 shadow-2xl"><h3 className="text-lg font-semibold">Create version</h3><p className="mb-5 mt-1 text-xs text-white/45">Create a Fabric profile for Minecraft {version}.</p><div className="grid gap-4"><label className="grid gap-2 text-xs text-white/55">Profile name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={`Minecraft ${version}`} className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white outline-none" /></label><label className="grid gap-2 text-xs text-white/55">Minecraft version<MinecraftVersionDropdown value={version} onChange={setVersion} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Loader<div className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white">Fabric</div></label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setCreating(false)} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-white/65">Cancel</button><button type="submit" className="rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black">Create version</button></div></form></div>}
+      {creating && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreating(false); }}><form onSubmit={createProfile} className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0e141b] p-6 shadow-2xl"><h3 className="text-lg font-semibold">Create Minecraft Profile</h3><p className="mb-5 mt-1 text-xs text-white/50">Choose Minecraft version, loader, and custom background wallpaper.</p><div className="grid gap-4"><label className="grid gap-2 text-xs text-white/55">Profile name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={`Minecraft ${version}`} className="rounded-lg border border-white/10 bg-[#121820] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400" /></label><div className="grid grid-cols-2 gap-3"><label className="grid gap-2 text-xs text-white/55">Minecraft version<MinecraftVersionDropdown value={version} onChange={setVersion} availableVersions={availableVersions} /></label><label className="grid gap-2 text-xs text-white/55">Mod loader<select value={loader} onChange={(event) => setLoader(event.target.value)} className="h-[42px] rounded-xl border border-white/10 bg-[#111820] px-3 text-sm text-white outline-none focus:border-sky-400"><option value="Fabric">Fabric</option><option value="Forge">Forge</option><option value="NeoForge">NeoForge</option><option value="Quilt">Quilt</option><option value="Vanilla">Vanilla</option></select></label></div><div className="grid gap-2 text-xs text-white/55"><span>Profile background wallpaper</span><div className="grid grid-cols-5 gap-2">{PROFILE_BACKGROUND_PRESETS.map((preset) => <button type="button" key={preset.id} onClick={() => setBackground(preset.url)} className={`relative h-14 overflow-hidden rounded-lg border text-left transition ${background === preset.url ? 'border-sky-400 ring-2 ring-sky-400/40' : 'border-white/15 opacity-70 hover:opacity-100'}`} title={preset.name}><img src={preset.url} alt={preset.name} className="h-full w-full object-cover" /></button>)}</div><input value={background} onChange={(event) => setBackground(event.target.value)} placeholder="Or paste background image URL" className="mt-1 rounded-lg border border-white/10 bg-[#121820] px-3 py-2 text-xs text-white outline-none focus:border-sky-400 placeholder:text-white/35" /></div></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setCreating(false)} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-white/65">Cancel</button><button type="submit" className="rounded-lg bg-sky-500 px-5 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-500/25 hover:bg-sky-400">Create Profile</button></div></form></div>}
     </div>
   </motion.div>;
 }
 
-function VersionProfileCard({ profile, availableVersions, active, onSelect, onUpdate, onRemove }: { profile: VersionProfile; availableVersions: string[]; active: boolean; onSelect: () => void; onUpdate: (updates: Partial<Pick<VersionProfile, 'name' | 'version'>>) => void; onRemove: () => void }) {
+function VersionProfileCard({ profile, availableVersions, active, onSelect, onUpdate, onRemove }: { profile: VersionProfile; availableVersions: string[]; active: boolean; onSelect: () => void; onUpdate: (updates: Partial<Pick<VersionProfile, 'name' | 'version' | 'loader' | 'background'>>) => void; onRemove: () => void }) {
   const [mods, setMods] = useState<InstalledMod[]>([]);
   const [addModOpen, setAddModOpen] = useState(false);
   const [addResourcePackOpen, setAddResourcePackOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bgPickerOpen, setBgPickerOpen] = useState(false);
   useEffect(() => { void window.electronAPI?.getInstalledMods(profile.id).then(setMods).catch(() => {}); }, [profile.id]);
   return <GlassCard className={`profile-card overflow-visible p-0 ${active ? 'profile-card-active' : ''}`}>
-    <div className="profile-card-cover">
+    <div className="profile-card-cover" style={{ backgroundImage: `linear-gradient(180deg, rgba(8, 14, 22, 0.4) 0%, rgba(8, 14, 22, 0.94) 100%), url(${profile.background || '/minecraft-hero-background.png'})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div className="profile-card-heading">
         <div className="profile-card-icon"><Layers3 className="h-6 w-6" /></div>
         <div className="min-w-0 flex-1">
           <input aria-label="Profile name" value={profile.name} onChange={(event) => onUpdate({ name: event.target.value })} className="w-full truncate bg-transparent text-base font-bold outline-none focus:text-sky-100" />
-          <p className="mt-1 truncate text-sm text-white/60">Bayon Client + Fabric {profile.version}</p>
+          <p className="mt-1 truncate text-sm text-white/60">Bayon Client + {profile.loader || 'Fabric'} {profile.version}</p>
         </div>
         {active && <span className="profile-active-mark" title="Selected for launch"><Check className="h-4 w-4" /></span>}
       </div>
       <div className="profile-card-version">
         <label className="grid min-w-0 flex-1 gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/45">Minecraft version<MinecraftVersionDropdown value={profile.version} onChange={(value) => onUpdate({ version: value })} availableVersions={availableVersions} /></label>
-        <div className="grid min-w-0 flex-1 gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/45">Mod loader<div className="profile-loader-value">Fabric</div></div>
+        <label className="grid min-w-0 flex-1 gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/45">Mod loader<select value={profile.loader || 'Fabric'} onChange={(event) => onUpdate({ loader: event.target.value })} className="profile-loader-select"><option value="Fabric">Fabric</option><option value="Forge">Forge</option><option value="NeoForge">NeoForge</option><option value="Quilt">Quilt</option><option value="Vanilla">Vanilla</option></select></label>
       </div>
     </div>
     <div className="profile-card-actions">
       <button type="button" onClick={onSelect} className="profile-action profile-action-primary"><Check className="h-4 w-4" />Use on Home</button>
       <button type="button" onClick={() => setAddModOpen(true)} className="profile-action"><Layers3 className="h-4 w-4" />Mods <span className="profile-action-count">{mods.length}</span></button>
       <button type="button" onClick={() => setAddResourcePackOpen(true)} className="profile-action"><FileImage className="h-4 w-4" />Resource Packs</button>
+      <button type="button" onClick={() => setBgPickerOpen(!bgPickerOpen)} className="profile-action" title="Change profile background"><ImagePlus className="h-4 w-4" />Wallpaper</button>
       <div className="relative">
         <button type="button" aria-label="More profile actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)} className="profile-action profile-action-menu"><MoreHorizontal className="h-5 w-5" /></button>
         {menuOpen && <><button type="button" aria-label="Close profile actions" className="fixed inset-0 z-10 cursor-default" onClick={() => setMenuOpen(false)} /><div className="profile-card-menu">
           <button type="button" onClick={() => { onSelect(); setMenuOpen(false); }}>Set as active profile</button>
+          <button type="button" onClick={() => { setBgPickerOpen(true); setMenuOpen(false); }}>Change background</button>
           <button type="button" className="profile-card-menu-danger" onClick={() => { onRemove(); setMenuOpen(false); }}>Remove profile</button>
         </div></>}
       </div>
     </div>
+    {bgPickerOpen && <div className="profile-bg-popover"><div className="profile-bg-popover-header"><strong>Profile Background</strong><button type="button" onClick={() => setBgPickerOpen(false)}>✕</button></div><div className="profile-bg-grid">{PROFILE_BACKGROUND_PRESETS.map((preset) => <button type="button" key={preset.id} onClick={() => { onUpdate({ background: preset.url }); setBgPickerOpen(false); }} className={`profile-bg-thumb ${(profile.background || '/minecraft-hero-background.png') === preset.url ? 'profile-bg-thumb-active' : ''}`}><img src={preset.url} alt={preset.name} /><span>{preset.name}</span></button>)}</div><input defaultValue={profile.background || ''} onKeyDown={(e) => { if (e.key === 'Enter') { onUpdate({ background: (e.target as HTMLInputElement).value.trim() }); setBgPickerOpen(false); } }} onBlur={(e) => onUpdate({ background: e.target.value.trim() })} placeholder="Or paste image URL and press Enter" className="profile-bg-input" /></div>}
     {addModOpen && <AddModModal onClose={() => setAddModOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} />}
     {addResourcePackOpen && <AddModModal onClose={() => setAddResourcePackOpen(false)} installedMods={mods} onModsChange={setMods} profileId={profile.id} gameVersion={profile.version} loader={profile.loader} projectType="resourcepack" />}
   </GlassCard>;
