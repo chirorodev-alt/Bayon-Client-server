@@ -38,7 +38,7 @@ public final class BayonPlaceholderScreen extends Screen {
         int panelWidth = Math.min(520, width - 28);
         int left = (width - panelWidth) / 2;
         int top = height / 2 - 86;
-        RenderUtil.roundedBorder(graphics, left, top, left + panelWidth, top + 144, 10, 1,
+        RenderUtil.roundedBorder(graphics, left, top, left + panelWidth, top + 144, BayonTheme.CORNER_RADIUS, 1,
                 BayonTheme.BORDER, BayonTheme.PANEL);
         var font = Minecraft.getInstance().font;
         graphics.centeredText(font, getTitle(), width / 2, top + 28, BayonTheme.TEXT);

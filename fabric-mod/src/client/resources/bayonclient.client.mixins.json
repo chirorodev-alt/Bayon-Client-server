@@ -4,7 +4,9 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "LoadingOverlayLogoMixin",
-    "BayonWindowTitleMixin"
+    "BayonWindowTitleMixin",
+    "BayonOfflineSkinMixin",
+    "TitleScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -5,6 +5,7 @@ import com.bayon.client.config.BayonConfig;
 import com.bayon.client.hud.BayonHud;
 import com.bayon.client.hud.BayonCustomizationScreen;
 import com.bayon.client.hud.BayonMainMenuScreen;
+import com.bayon.client.ui.BayonMainMenu;
 import com.bayon.client.cape.BayonCapeLayer;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
@@ -58,8 +59,8 @@ public final class BayonClient implements ClientModInitializer {
             }
             if (BayonConfig.customTitleScreenEnabled()
                     && client.gui.screen() instanceof net.minecraft.client.gui.screens.TitleScreen
-                    && !(client.gui.screen() instanceof BayonMainMenuScreen)) {
-                client.gui.setScreen(new BayonMainMenuScreen());
+                    && !(client.gui.screen() instanceof BayonMainMenu)) {
+                client.gui.setScreen(new BayonMainMenu());
                 return;
             }
             while (openEditor.consumeClick()) {

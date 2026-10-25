@@ -11,7 +11,7 @@ import net.minecraft.resources.Identifier;
 
 /** Bayon-styled control that does not use Minecraft's vanilla button sprites. */
 public final class BayonButton extends AbstractWidget {
-    public enum Style { PRIMARY, SECONDARY, COMPACT }
+    public enum Style { PRIMARY, SECONDARY, COMPACT, DANGER }
 
     private final Runnable action;
     private final Style style;
@@ -54,11 +54,14 @@ public final class BayonButton extends AbstractWidget {
         float target = highlighted ? 1f : 0f;
         hoverBlend = BayonConfig.animationsEnabled()
                 ? AnimationUtil.approach(hoverBlend, target, delta, 3_000f / BayonTheme.HOVER_MILLIS) : target;
-        int idleFill = style == Style.PRIMARY ? BayonTheme.PRIMARY_TOP : BayonTheme.SECONDARY;
-        int hoverFill = style == Style.PRIMARY ? BayonTheme.PRIMARY_BOTTOM : BayonTheme.SECONDARY_HOVER;
+        int idleFill = style == Style.DANGER ? 0xCC8C1B24
+                : style == Style.PRIMARY ? BayonTheme.PRIMARY_TOP : BayonTheme.SECONDARY;
+        int hoverFill = style == Style.DANGER ? 0xEEB4242E
+                : style == Style.PRIMARY ? BayonTheme.PRIMARY_BOTTOM : BayonTheme.SECONDARY_HOVER;
         int fill = !active ? 0xFF292929 : blend(idleFill, hoverFill, hoverBlend);
         if (pressed && active) fill = blend(fill, 0xFFFFFFFF, 0.18f);
         int border = !active ? 0xFF555555
+                : style == Style.DANGER ? (hoverBlend > 0.02f ? 0xCCF87171 : 0x80DC4450)
                 : hoverBlend > 0.02f ? BayonTheme.ACCENT_BRIGHT : BayonTheme.BORDER;
         int textColor = active ? style == Style.PRIMARY ? BayonTheme.PRIMARY_TEXT : BayonTheme.TEXT
                 : BayonTheme.MUTED;
@@ -71,27 +74,32 @@ public final class BayonButton extends AbstractWidget {
             graphics.pose().translate(-(x + width / 2f), -(y + height / 2f));
         }
         if (hoverBlend > 0.02f) {
-            RenderUtil.glow(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS,
-                    ThemeManager.withOpacity(BayonTheme.ACCENT, hoverBlend * 0.10f), 2, 2);
+            int glowColor = style == Style.DANGER ? 0x44DC2626 : ThemeManager.withOpacity(BayonTheme.ACCENT, hoverBlend * 0.18f);
+            RenderUtil.glow(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS, glowColor, 2, 2);
         }
-        graphics.fill(x, y, right, bottom, fill);
-        graphics.outline(x, y, width, height, border);
-        graphics.fill(x + 1, y + 1, right - 1, y + 2,
+        RenderUtil.roundedBorder(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS, 1, border, fill);
+        RenderUtil.roundedRect(graphics, x + 1, y + 1, right - 1, y + 2, 1,
                 ThemeManager.withOpacity(0xFFFFFFFF, style == Style.PRIMARY ? 0.32f : 0.15f));
 
         var font = Minecraft.getInstance().font;
         int textY = y + Math.max(0, (height - font.lineHeight) / 2);
-        if (icon == null || width >= 80) {
-            int textCenter = x + width / 2 + (icon != null && !showChevron ? 7 : 0);
-            graphics.centeredText(font, getMessage(), textCenter, textY, textColor);
-        }
-        if (icon != null) {
+        boolean hasText = !getMessage().getString().isEmpty();
+
+        if (icon != null && hasText) {
+            int iconSize = Math.min(20, Math.max(16, height - 12));
+            int contentWidth = iconSize + 8 + font.width(getMessage());
+            int contentLeft = x + (width - contentWidth) / 2;
             Identifier iconTexture = Identifier.fromNamespaceAndPath("bayonclient", "textures/gui/icons/" + icon + ".png");
-            int iconSize = Math.min(24, Math.max(18, height - 6));
-            int iconX = width < 80 ? x + (width - iconSize) / 2 : x + 18;
-            RenderUtil.texture(graphics, iconTexture, iconX, y + (height - iconSize) / 2,
-                    iconSize, iconSize, 64, 64);
+            RenderUtil.texture(graphics, iconTexture, contentLeft, y + (height - iconSize) / 2, iconSize, iconSize, 64, 64);
+            graphics.text(font, getMessage(), contentLeft + iconSize + 8, textY, textColor, false);
+        } else if (icon != null) {
+            int iconSize = Math.min(20, Math.max(16, height - 10));
+            Identifier iconTexture = Identifier.fromNamespaceAndPath("bayonclient", "textures/gui/icons/" + icon + ".png");
+            RenderUtil.texture(graphics, iconTexture, x + (width - iconSize) / 2, y + (height - iconSize) / 2, iconSize, iconSize, 64, 64);
+        } else if (hasText) {
+            graphics.centeredText(font, getMessage(), x + width / 2, textY, textColor);
         }
+
         if (showChevron) {
             graphics.text(font, BayonUi.text(">"), right - 20 + Math.round(3 * hoverBlend), textY, textColor, false);
         }

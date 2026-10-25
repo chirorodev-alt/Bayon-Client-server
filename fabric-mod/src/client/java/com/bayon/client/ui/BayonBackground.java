@@ -17,8 +17,8 @@ public final class BayonBackground {
     public static void draw(GuiGraphicsExtractor graphics, int width, int height) {
         Identifier texture = "nightfall".equals(BayonConfig.background()) ? NIGHTFALL_BACKGROUND : BAYON_BACKGROUND;
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, 0, 0, 0, 0, width, height, 1920, 1080);
-        RenderUtil.gradient(graphics, 0, 0, width, height, 0x40000000, 0xAD000000);
-        graphics.fill(0, 0, width, 58, 0x72000000);
+        RenderUtil.gradient(graphics, 0, 0, width, height, 0x18000000, 0x52000000);
+        graphics.fill(0, 0, width, 58, 0x25000000);
         int edge = Math.max(12, width / 18);
         for (int band = 0; band < 8; band++) {
             int alpha = 19 - band * 2;
