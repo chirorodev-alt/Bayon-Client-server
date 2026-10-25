@@ -78,8 +78,6 @@ public final class BayonButton extends AbstractWidget {
             RenderUtil.glow(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS, glowColor, 2, 2);
         }
         RenderUtil.roundedBorder(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS, 1, border, fill);
-        RenderUtil.roundedRect(graphics, x + 1, y + 1, right - 1, y + 2, 1,
-                ThemeManager.withOpacity(0xFFFFFFFF, style == Style.PRIMARY ? 0.32f : 0.15f));
 
         var font = Minecraft.getInstance().font;
         int textY = y + Math.max(0, (height - font.lineHeight) / 2);

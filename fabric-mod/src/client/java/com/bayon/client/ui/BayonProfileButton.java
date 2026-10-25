@@ -43,7 +43,6 @@ public final class BayonProfileButton extends AbstractWidget {
                     ThemeManager.withOpacity(BayonTheme.ACCENT, hoverBlend * 0.18f), 2, 2);
         }
         RenderUtil.roundedBorder(graphics, x, y, right, bottom, BayonTheme.CORNER_RADIUS, 1, border, fill);
-        RenderUtil.roundedRect(graphics, x + 2, y + 1, right - 2, y + 2, 1, 0x22FFFFFF);
 
         Minecraft client = Minecraft.getInstance();
         com.mojang.authlib.GameProfile profile = new com.mojang.authlib.GameProfile(

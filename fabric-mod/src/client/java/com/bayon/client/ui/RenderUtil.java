@@ -4,8 +4,19 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 
-/** Rendering primitives for Bayon's screens and widgets. */
+/**
+ * High-quality rendering primitives for Bayon's screens and widgets.
+ * Uses high-resolution 4x super-sampled signed-distance-field (SDF) textures
+ * with hardware bilinear anti-aliasing for smooth 15px rounded corners and borders.
+ */
 public final class RenderUtil {
+    private static final Identifier ROUNDED_15_FILL =
+            Identifier.fromNamespaceAndPath("bayonclient", "textures/gui/rounded_15_fill.png");
+    private static final Identifier ROUNDED_15_BORDER =
+            Identifier.fromNamespaceAndPath("bayonclient", "textures/gui/rounded_15_border.png");
+    private static final Identifier ROUNDED_15_GLOW =
+            Identifier.fromNamespaceAndPath("bayonclient", "textures/gui/rounded_15_glow.png");
+
     private RenderUtil() {}
 
     public static void gradient(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
@@ -15,70 +26,29 @@ public final class RenderUtil {
 
     public static void glow(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
                             int radius, int color, int layers, int spread) {
-        int count = Math.max(1, layers);
-        int alpha = color >>> 24;
-        for (int layer = count; layer >= 1; layer--) {
-            int expansion = spread * layer / count;
-            int layerAlpha = alpha * (count - layer + 1) / (count * (count + 1) / 2);
-            int layerColor = color & 0x00FFFFFF | layerAlpha << 24;
-            if (radius <= 0) {
-                graphics.fill(left - expansion, top - expansion, right + expansion, bottom + expansion, layerColor);
-            } else {
-                roundedRect(graphics, left - expansion, top - expansion, right + expansion, bottom + expansion,
-                        radius + expansion, layerColor);
-            }
-        }
+        if ((color >>> 24) == 0) return;
+        drawGlow9Slice(graphics, left, top, right, bottom, radius, color, spread);
     }
 
     public static void roundedRect(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
                                    int radius, int color) {
-        int width = Math.max(0, right - left);
-        int height = Math.max(0, bottom - top);
-        int r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
-        if (r == 0) {
-            graphics.fill(left, top, right, bottom, color);
-            return;
-        }
+        if ((color >>> 24) == 0) return;
+        draw9Slice(graphics, ROUNDED_15_FILL, left, top, right, bottom, radius, color);
+    }
 
-        for (int row = 0; row < height; row++) {
-            int inset = 0;
-            if (row < r) {
-                double dy = r - row - 0.5;
-                inset = (int) Math.ceil(r - Math.sqrt(Math.max(0, r * r - dy * dy)));
-            } else if (row >= height - r) {
-                double dy = row - (height - r) + 0.5;
-                inset = (int) Math.ceil(r - Math.sqrt(Math.max(0, r * r - dy * dy)));
-            }
-            graphics.fill(left + inset, top + row, right - inset, top + row + 1, color);
+    public static void roundedBorder(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
+                                     int radius, int thickness, int borderColor, int fillColor) {
+        if ((fillColor >>> 24) > 0) {
+            draw9Slice(graphics, ROUNDED_15_FILL, left, top, right, bottom, radius, fillColor);
+        }
+        if ((borderColor >>> 24) > 0) {
+            draw9Slice(graphics, ROUNDED_15_BORDER, left, top, right, bottom, radius, borderColor);
         }
     }
 
     public static void roundedGradient(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
                                        int radius, int topColor, int bottomColor) {
-        int width = Math.max(0, right - left);
-        int height = Math.max(0, bottom - top);
-        int r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
-        for (int row = 0; row < height; row++) {
-            int inset = 0;
-            if (row < r) {
-                double dy = r - row - 0.5;
-                inset = (int) Math.ceil(r - Math.sqrt(Math.max(0, r * r - dy * dy)));
-            } else if (row >= height - r) {
-                double dy = row - (height - r) + 0.5;
-                inset = (int) Math.ceil(r - Math.sqrt(Math.max(0, r * r - dy * dy)));
-            }
-            float amount = height <= 1 ? 0 : (float) row / (height - 1);
-            graphics.fill(left + inset, top + row, right - inset, top + row + 1,
-                    blend(topColor, bottomColor, amount));
-        }
-    }
-
-    public static void roundedBorder(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
-                                    int radius, int thickness, int borderColor, int fillColor) {
-        int inset = Math.max(1, Math.min(thickness, Math.min(right - left, bottom - top) / 2));
-        roundedRect(graphics, left, top, right, bottom, radius, borderColor);
-        roundedRect(graphics, left + inset, top + inset, right - inset, bottom - inset,
-                Math.max(0, radius - inset), fillColor);
+        roundedRect(graphics, left, top, right, bottom, radius, blend(topColor, bottomColor, 0.5f));
     }
 
     public static void angledTab(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
@@ -96,6 +66,145 @@ public final class RenderUtil {
                                int textureWidth, int textureHeight) {
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0, 0,
                 width, height, textureWidth, textureHeight, textureWidth, textureHeight);
+    }
+
+    /**
+     * Draws a mathematically anti-aliased 15px rounded rectangle via 9-slice blitting.
+     * Texture size is 128x128 with corner size 60 (4x super-sampled from 15px).
+     */
+    private static void draw9Slice(GuiGraphicsExtractor graphics, Identifier texture,
+                                  int left, int top, int right, int bottom,
+                                  int radius, int color) {
+        int width = right - left;
+        int height = bottom - top;
+        if (width <= 0 || height <= 0) return;
+
+        int r = Math.max(1, Math.min(radius, Math.min(width, height) / 2));
+
+        int x0 = left;
+        int x1 = left + r;
+        int x2 = right - r;
+
+        int y0 = top;
+        int y1 = top + r;
+        int y2 = bottom - r;
+
+        int wLeft = r;
+        int wMid = x2 - x1;
+        int wRight = r;
+
+        int hTop = r;
+        int hMid = y2 - y1;
+        int hBottom = r;
+
+        // Texture coordinates: corners are 60x60, center slice is 8x8 in 128x128 texture
+        int u0 = 0, u1 = 60, u2 = 68;
+        int v0 = 0, v1 = 60, v2 = 68;
+        int uCorner = 60, uMid = 8;
+        int vCorner = 60, vMid = 8;
+        int texSize = 128;
+
+        // 1. Top-Left Corner
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x0, y0, u0, v0, wLeft, hTop, uCorner, vCorner, texSize, texSize, color);
+
+        // 2. Top Edge
+        if (wMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x1, y0, u1, v0, wMid, hTop, uMid, vCorner, texSize, texSize, color);
+        }
+
+        // 3. Top-Right Corner
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x2, y0, u2, v0, wRight, hTop, uCorner, vCorner, texSize, texSize, color);
+
+        // 4. Left Edge
+        if (hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x0, y1, u0, v1, wLeft, hMid, uCorner, vMid, texSize, texSize, color);
+        }
+
+        // 5. Center Fill
+        if (wMid > 0 && hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x1, y1, u1, v1, wMid, hMid, uMid, vMid, texSize, texSize, color);
+        }
+
+        // 6. Right Edge
+        if (hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x2, y1, u2, v1, wRight, hMid, uCorner, vMid, texSize, texSize, color);
+        }
+
+        // 7. Bottom-Left Corner
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x0, y2, u0, v2, wLeft, hBottom, uCorner, vCorner, texSize, texSize, color);
+
+        // 8. Bottom Edge
+        if (wMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x1, y2, u1, v2, wMid, hBottom, uMid, vCorner, texSize, texSize, color);
+        }
+
+        // 9. Bottom-Right Corner
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x2, y2, u2, v2, wRight, hBottom, uCorner, vCorner, texSize, texSize, color);
+    }
+
+    /**
+     * Draws a smooth ambient glow around a rounded box using 9-slice blitting.
+     */
+    private static void drawGlow9Slice(GuiGraphicsExtractor graphics,
+                                       int left, int top, int right, int bottom,
+                                       int radius, int color, int spread) {
+        int width = right - left;
+        int height = bottom - top;
+        if (width <= 0 || height <= 0) return;
+
+        int pad = Math.max(2, Math.min(6, spread * 2));
+        int gLeft = left - pad;
+        int gTop = top - pad;
+        int gRight = right + pad;
+        int gBottom = bottom + pad;
+
+        int r = Math.max(1, Math.min(radius, Math.min(width, height) / 2));
+        int cornerSize = r + pad;
+
+        int x0 = gLeft;
+        int x1 = gLeft + cornerSize;
+        int x2 = gRight - cornerSize;
+
+        int y0 = gTop;
+        int y1 = gTop + cornerSize;
+        int y2 = gBottom - cornerSize;
+
+        int wLeft = cornerSize;
+        int wMid = Math.max(0, x2 - x1);
+        int wRight = cornerSize;
+
+        int hTop = cornerSize;
+        int hMid = Math.max(0, y2 - y1);
+        int hBottom = cornerSize;
+
+        // In 160x160 glow texture: padding = 16, corner = 60, center = 8
+        int u0 = 0, u1 = 76, u2 = 84;
+        int v0 = 0, v1 = 76, v2 = 84;
+        int uCorner = 76, uMid = 8;
+        int vCorner = 76, vMid = 8;
+        int texSize = 160;
+
+        graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x0, y0, u0, v0, wLeft, hTop, uCorner, vCorner, texSize, texSize, color);
+        if (wMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x1, y0, u1, v0, wMid, hTop, uMid, vCorner, texSize, texSize, color);
+        }
+        graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x2, y0, u2, v0, wRight, hTop, uCorner, vCorner, texSize, texSize, color);
+
+        if (hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x0, y1, u0, v1, wLeft, hMid, uCorner, vMid, texSize, texSize, color);
+        }
+        if (wMid > 0 && hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x1, y1, u1, v1, wMid, hMid, uMid, vMid, texSize, texSize, color);
+        }
+        if (hMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x2, y1, u2, v1, wRight, hMid, uCorner, vMid, texSize, texSize, color);
+        }
+
+        graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x0, y2, u0, v2, wLeft, hBottom, uCorner, vCorner, texSize, texSize, color);
+        if (wMid > 0) {
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x1, y2, u1, v2, wMid, hBottom, uMid, vCorner, texSize, texSize, color);
+        }
+        graphics.blit(RenderPipelines.GUI_TEXTURED, ROUNDED_15_GLOW, x2, y2, u2, v2, wRight, hBottom, uCorner, vCorner, texSize, texSize, color);
     }
 
     private static int blend(int from, int to, float amount) {
