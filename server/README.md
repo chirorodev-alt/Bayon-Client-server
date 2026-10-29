@@ -66,9 +66,15 @@ The admin panel can review client-submitted bug reports and positive feedback (i
 
 ### Private Bayon Client updates
 
-Desktop updates use the backend's generic update feed (`/api/client-updates/latest.yml`); they are not published as GitHub releases. After setting a newer version in the root `package.json`, run `npm run dist` and upload the matching `release/Bayon-Client-Setup-<version>.exe` from the private admin page's **Client updates** section. The backend verifies the Windows executable, computes its SHA-512 checksum, publishes the update manifest, and serves the installer to packaged NSIS clients. Do not upload the portable `.exe`; the portable build does not self-update.
+Desktop updates use the backend's generic update feeds; they are not published to the website automatically by GitHub. Set the version in the root `package.json`, build each platform, then upload the matching package from the private admin page's **Client updates** section using the platform selector:
 
-The installer and manifest are stored under `server/data/client-updates` by default. On Render, the filesystem is ephemeral unless a persistent disk is attached. Before publishing updates, attach persistent storage and set `CLIENT_UPDATE_STORAGE_DIR` to its mounted directory (for example `/var/data/client-updates`). Set `CLIENT_UPDATE_BASE_VERSION` to the version already installed on users' clients if it differs from `1.0.1`. Each uploaded release must have a version newer than the current release. Users' installed clients check the backend periodically and download updates automatically.
+- Windows: `npm run dist:win`, then upload `release/Bayon-Client-Setup-<version>.exe`. Do not upload the portable `.exe`.
+- Linux: `npm run dist:linux`, then upload the x64 `.AppImage`. AppImage builds self-update; Debian packages do not.
+- macOS: `npm run dist:mac`, then upload the universal `.zip`, not the `.dmg`.
+
+The backend validates the platform file signature, calculates its SHA-512 checksum, and publishes the matching `latest.yml`, `latest-linux.yml`, or `latest-mac.yml` feed. Packaged NSIS, AppImage, and macOS clients check their platform feed automatically and download available updates.
+
+Packages and manifests are stored under `server/data/client-updates` by default. On Render, the filesystem is ephemeral unless a persistent disk is attached. Before publishing updates, attach persistent storage and set `CLIENT_UPDATE_STORAGE_DIR` to its mounted directory (for example `/var/data/client-updates`). Set `CLIENT_UPDATE_BASE_VERSION` to the version already installed on users' clients if it differs from `1.0.1`. Each platform's uploaded version must be newer than that platform's current release. macOS auto-updates require a signed application; configure the `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` GitHub Actions secrets before distributing macOS auto-updates.
 
 You can generate codes in the private admin panel, or from a trusted administrator machine. The key is read from `BACOIN_ADMIN_KEY`; never put it in the launcher or commit it to source control. Returned plaintext codes are shown once, so save them securely:
 

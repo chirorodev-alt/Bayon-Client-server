@@ -384,8 +384,16 @@ const clientUpdateMaxSize = 1024 * 1024 * 1024;
 fs.mkdirSync(clientUpdateIncomingDirectory, { recursive: true });
 const configuredUpdateBaseVersion = process.env.CLIENT_UPDATE_BASE_VERSION || '1.0.1';
 const initialUpdateVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(configuredUpdateBaseVersion) ? configuredUpdateBaseVersion : '1.0.1';
-if (!fs.existsSync(path.join(clientUpdateDirectory, 'latest.yml'))) {
-  fs.writeFileSync(path.join(clientUpdateDirectory, 'latest.yml'), `version: ${initialUpdateVersion}\nfiles: []\nreleaseDate: ${new Date().toISOString()}\n`, 'utf8');
+const clientUpdatePlatforms = {
+  windows: { manifest: 'latest.yml', extension: '.exe', prefix: 'Bayon-Client-Setup-', signature: 'MZ' },
+  linux: { manifest: 'latest-linux.yml', extension: '.AppImage', prefix: 'Bayon-Client-', signature: '\x7fELF' },
+  macos: { manifest: 'latest-mac.yml', extension: '.zip', prefix: 'Bayon-Client-', signature: 'PK' },
+};
+for (const { manifest } of Object.values(clientUpdatePlatforms)) {
+  const manifestPath = path.join(clientUpdateDirectory, manifest);
+  if (!fs.existsSync(manifestPath)) {
+    fs.writeFileSync(manifestPath, `version: ${initialUpdateVersion}\nfiles: []\nreleaseDate: ${new Date().toISOString()}\n`, 'utf8');
+  }
 }
 app.use('/api/client-updates', express.static(clientUpdateDirectory, {
   dotfiles: 'deny', index: false, fallthrough: false, maxAge: 0,
@@ -806,9 +814,11 @@ app.delete('/api/admin/client-feedback/:feedbackId', requireAdmin, (req, res) =>
 app.get('/api/admin/client-updates', requireAdmin, (_req, res) => {
   try {
     const currentPath = path.join(clientUpdateDirectory, 'current.json');
-    const current = fs.existsSync(currentPath) ? JSON.parse(fs.readFileSync(currentPath, 'utf8')) : null;
-    res.json({ current, baseVersion: initialUpdateVersion });
-  } catch {
+    const stored = fs.existsSync(currentPath) ? JSON.parse(fs.readFileSync(currentPath, 'utf8')) : {};
+    const platforms = stored.platforms || (stored.version ? { windows: stored } : {});
+    res.json({ current: platforms, baseVersion: initialUpdateVersion });
+  } catch (error) {
+    console.error('Could not read the current client update:', error);
     res.status(500).json({ error: 'Could not read the current client update.' });
   }
 });
@@ -828,18 +838,29 @@ function compareClientVersions(left, right) {
 }
 
 app.post('/api/admin/client-updates/upload', requireAdmin, (req, res) => {
-  const { version, fileName, size } = req.body || {};
+  const { version, platform, fileName, size } = req.body || {};
   const bytes = Number(size);
+  const platformConfig = clientUpdatePlatforms[platform];
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version) || version.length > 48) return res.status(400).json({ error: 'Enter a valid client version such as 1.0.2.' });
-  if (typeof fileName !== 'string' || !/\.exe$/i.test(fileName) || !Number.isSafeInteger(bytes) || bytes < 2 || bytes > clientUpdateMaxSize) return res.status(400).json({ error: 'Choose a Windows installer .exe smaller than 1 GB.' });
+  if (!platformConfig || typeof fileName !== 'string' || path.basename(fileName) !== fileName || !fileName.toLowerCase().endsWith(platformConfig.extension.toLowerCase()) || !Number.isSafeInteger(bytes) || bytes < 4 || bytes > clientUpdateMaxSize) {
+    return res.status(400).json({ error: 'Choose the installer file for the selected platform. Files must be smaller than 1 GB.' });
+  }
   let installedReleaseVersion = initialUpdateVersion;
-  try { installedReleaseVersion = JSON.parse(fs.readFileSync(path.join(clientUpdateDirectory, 'current.json'), 'utf8')).version || initialUpdateVersion; } catch {}
+  try {
+    const currentPath = path.join(clientUpdateDirectory, 'current.json');
+    const stored = fs.existsSync(currentPath) ? JSON.parse(fs.readFileSync(currentPath, 'utf8')) : {};
+    const platforms = stored.platforms || (stored.version ? { windows: stored } : {});
+    installedReleaseVersion = platforms[platform]?.version || initialUpdateVersion;
+  } catch (error) {
+    console.error('Could not read the current client update before upload:', error);
+    return res.status(500).json({ error: 'Could not read the current client update.' });
+  }
   if (compareClientVersions(version, installedReleaseVersion) <= 0) return res.status(400).json({ error: `Version ${version} must be newer than the current release ${installedReleaseVersion}.` });
   const uploadId = crypto.randomBytes(18).toString('hex');
   const totalChunks = Math.ceil(bytes / clientUpdateChunkSize);
   const directory = path.join(clientUpdateIncomingDirectory, uploadId);
   fs.mkdirSync(directory, { recursive: true });
-  clientUpdateUploadSessions.set(uploadId, { version, size: bytes, totalChunks, directory, startedAt: Date.now() });
+  clientUpdateUploadSessions.set(uploadId, { version, platform, size: bytes, totalChunks, directory, startedAt: Date.now() });
   res.status(201).json({ uploadId, chunkSize: clientUpdateChunkSize, totalChunks });
 });
 
@@ -864,7 +885,10 @@ app.post('/api/admin/client-updates/upload/:uploadId/finish', requireAdmin, asyn
   const { uploadId } = req.params;
   const session = clientUpdateUploadSessions.get(uploadId);
   if (!/^[a-f0-9]{36}$/.test(uploadId) || !session) return res.status(404).json({ error: 'Upload session not found. Start the upload again.' });
-  const fileName = `Bayon-Client-Setup-${session.version}.exe`;
+  const platformConfig = clientUpdatePlatforms[session.platform];
+  if (!platformConfig) return res.status(400).json({ error: 'Upload platform is not supported.' });
+  const platformSuffix = session.platform === 'linux' ? '-linux-x64' : session.platform === 'macos' ? '-mac-universal' : '';
+  const fileName = `${platformConfig.prefix}${session.version}${platformSuffix}${platformConfig.extension}`;
   const tempPath = path.join(clientUpdateDirectory, `.${fileName}.${uploadId}.tmp`);
   const filePath = path.join(clientUpdateDirectory, fileName);
   try {
@@ -879,10 +903,13 @@ app.post('/api/admin/client-updates/upload/:uploadId/finish', requireAdmin, asyn
       }
     })());
     await pipeline(chunkStream, fs.createWriteStream(tempPath, { flags: 'wx' }));
-    const signature = Buffer.alloc(2);
+    const signature = Buffer.alloc(Buffer.byteLength(platformConfig.signature));
     const descriptor = fs.openSync(tempPath, 'r');
-    try { fs.readSync(descriptor, signature, 0, 2, 0); } finally { fs.closeSync(descriptor); }
-    if (fs.statSync(tempPath).size !== session.size || signature.toString('ascii') !== 'MZ') throw new Error('The upload is not a valid Windows .exe installer.');
+    try { fs.readSync(descriptor, signature, 0, signature.length, 0); } finally { fs.closeSync(descriptor); }
+    const expectedSignature = Buffer.from(platformConfig.signature, 'binary');
+    if (fs.statSync(tempPath).size !== session.size || !signature.equals(expectedSignature)) {
+      throw new Error(`The uploaded file is not a valid ${session.platform} update package.`);
+    }
     const hash = crypto.createHash('sha512');
     for await (const chunk of fs.createReadStream(tempPath)) hash.update(chunk);
     const sha512 = hash.digest('base64');
@@ -899,16 +926,20 @@ app.post('/api/admin/client-updates/upload/:uploadId/finish', requireAdmin, asyn
       `releaseDate: ${releaseDate}`,
       '',
     ].join('\n');
-    const manifestTemp = path.join(clientUpdateDirectory, `.latest.${uploadId}.tmp`);
+    const manifestTemp = path.join(clientUpdateDirectory, `.${platformConfig.manifest}.${uploadId}.tmp`);
     fs.writeFileSync(manifestTemp, latestManifest, { flag: 'wx' });
-    fs.renameSync(manifestTemp, path.join(clientUpdateDirectory, 'latest.yml'));
-    const current = { version: session.version, fileName, size: session.size, sha512, releaseDate };
+    fs.renameSync(manifestTemp, path.join(clientUpdateDirectory, platformConfig.manifest));
     const currentTemp = path.join(clientUpdateDirectory, `.current.${uploadId}.tmp`);
-    fs.writeFileSync(currentTemp, JSON.stringify(current, null, 2), { flag: 'wx' });
+    const currentPath = path.join(clientUpdateDirectory, 'current.json');
+    const stored = fs.existsSync(currentPath) ? JSON.parse(fs.readFileSync(currentPath, 'utf8')) : {};
+    const currentPlatforms = stored.platforms || (stored.version ? { windows: stored } : {});
+    const currentRelease = { platform: session.platform, version: session.version, fileName, size: session.size, sha512, releaseDate };
+    currentPlatforms[session.platform] = currentRelease;
+    fs.writeFileSync(currentTemp, JSON.stringify({ platforms: currentPlatforms }, null, 2), { flag: 'wx' });
     fs.renameSync(currentTemp, path.join(clientUpdateDirectory, 'current.json'));
     fs.rmSync(session.directory, { recursive: true, force: true });
     clientUpdateUploadSessions.delete(uploadId);
-    res.status(201).json({ success: true, current });
+    res.status(201).json({ success: true, current: currentRelease });
   } catch (error) {
     try { fs.rmSync(tempPath, { force: true }); } catch {}
     res.status(500).json({ error: error instanceof Error ? error.message : 'Could not publish this client update.' });

@@ -1469,7 +1469,9 @@ function publishAppUpdateState(nextState) {
 }
 
 function canUseAutoUpdater() {
-  return app.isPackaged && process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR;
+  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR) return false;
+  if (process.platform === 'linux') return Boolean(process.env.APPIMAGE);
+  return process.platform === 'win32' || process.platform === 'darwin';
 }
 
 async function checkForClientUpdates() {

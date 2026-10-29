@@ -93,9 +93,17 @@ Use **Mods → Add mod** to search the live Modrinth catalog and install mods di
 
 ## Production build
 
+Create installable packages on the corresponding operating system:
+
 ```bash
-npm run build
+npm run dist:win
+npm run dist:linux
+npm run dist:mac
 ```
+
+The Windows command creates NSIS and portable installers; Linux creates x64 AppImage and Debian packages; macOS creates a universal DMG and ZIP for Intel and Apple Silicon. macOS packages must be built on a Mac. `npm run dist` remains an alias for the Windows build. All packages are written to `release/`.
+
+The GitHub Actions release workflow builds each platform on a native runner when a `v*` tag is pushed, then attaches the installers to that GitHub Release. Upload the generated Windows NSIS installer, Linux AppImage, and macOS universal ZIP separately in the private admin page's **Client updates** section to publish website auto-updates. macOS auto-updates require a signed app; configure the `MACOS_CERTIFICATE` (base64-encoded Developer ID `.p12`), `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` GitHub Actions secrets before publishing a macOS update.
 
 ## Notes
 
