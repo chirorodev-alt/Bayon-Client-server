@@ -43,20 +43,22 @@ jobs:
       - name: Build Windows or Linux package
         if: matrix.platform != 'macos'
         run: npm run ${{ matrix.script }}
-      - name: Build signed macOS package
-        if: matrix.platform == 'macos' && secrets.MACOS_CERTIFICATE != ''
+      - name: Build macOS package
+        if: matrix.platform == 'macos'
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run dist:mac
-      - name: Build unsigned macOS package
-        if: matrix.platform == 'macos' && secrets.MACOS_CERTIFICATE == ''
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist:mac
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            npm run dist:mac
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            npm run dist:mac
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: bayon-client-${{ matrix.platform }}-${{ github.ref_name }}
