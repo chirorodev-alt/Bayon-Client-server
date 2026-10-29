@@ -2,7 +2,8 @@
   "name": "bayon-client",
   "productName": "Bayon Client",
   "author": {
-    "name": "Bayon"
+    "name": "Bayon",
+    "email": "roroc858@gmail.com"
   },
   "private": true,
   "version": "2.0.1",
@@ -113,6 +114,7 @@
       "icon": "public/bayon-icon.ico"
     },
     "mac": {
+      "x64ArchFiles": "**/node_modules/@tailwindcss/oxide-darwin-arm64/tailwindcss-oxide.darwin-arm64.node",
       "target": [
         {
           "target": "dmg",
