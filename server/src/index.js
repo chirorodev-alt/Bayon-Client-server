@@ -395,6 +395,56 @@ for (const { manifest } of Object.values(clientUpdatePlatforms)) {
     fs.writeFileSync(manifestPath, `version: ${initialUpdateVersion}\nfiles: []\nreleaseDate: ${new Date().toISOString()}\n`, 'utf8');
   }
 }
+function readClientUpdatePlatforms() {
+  const currentPath = path.join(clientUpdateDirectory, 'current.json');
+  if (!fs.existsSync(currentPath)) return {};
+  const stored = JSON.parse(fs.readFileSync(currentPath, 'utf8'));
+  return stored.platforms || (stored.version ? { windows: stored } : {});
+}
+app.get('/api/client-updates/releases', (_req, res) => {
+  try {
+    const stored = readClientUpdatePlatforms();
+    const releases = {};
+    for (const [platform, update] of Object.entries(stored)) {
+      const config = clientUpdatePlatforms[platform];
+      if (!config || typeof update?.fileName !== 'string' || path.basename(update.fileName) !== update.fileName) continue;
+      const filePath = path.join(clientUpdateDirectory, update.fileName);
+      if (!fs.existsSync(filePath)) continue;
+      releases[platform] = {
+        version: update.version,
+        size: fs.statSync(filePath).size,
+        downloadUrl: `/api/client-updates/download/${platform}`,
+      };
+    }
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.json({ releases });
+  } catch (error) {
+    console.error('Could not list available client downloads:', error);
+    res.status(500).json({ error: 'Could not load client downloads.' });
+  }
+});
+app.get('/api/client-updates/download/:platform', (req, res) => {
+  const config = clientUpdatePlatforms[req.params.platform];
+  if (!config) return res.status(404).json({ error: 'Unsupported client platform.' });
+  try {
+    const update = readClientUpdatePlatforms()[req.params.platform];
+    if (!update || typeof update.fileName !== 'string' || path.basename(update.fileName) !== update.fileName) {
+      return res.status(404).json({ error: `No ${req.params.platform} client download is available yet.` });
+    }
+    const filePath = path.join(clientUpdateDirectory, update.fileName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: `No ${req.params.platform} client download is available yet.` });
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.download(filePath, update.fileName, (error) => {
+      if (error && !res.headersSent) {
+        console.error(`Could not serve the ${req.params.platform} client download:`, error);
+        res.status(500).json({ error: 'Could not download the Bayon Client installer.' });
+      }
+    });
+  } catch (error) {
+    console.error(`Could not load the ${req.params.platform} client download:`, error);
+    res.status(500).json({ error: 'Could not download the Bayon Client installer.' });
+  }
+});
 app.use('/api/client-updates', express.static(clientUpdateDirectory, {
   dotfiles: 'deny', index: false, fallthrough: false, maxAge: 0,
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-store, max-age=0'),
