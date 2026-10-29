@@ -114,7 +114,10 @@
       "icon": "public/bayon-icon.ico"
     },
     "mac": {
-      "x64ArchFiles": "**/node_modules/@tailwindcss/oxide-darwin-arm64/tailwindcss-oxide.darwin-arm64.node",
+      "x64ArchFiles": [
+        "**/node_modules/@tailwindcss/oxide-darwin-arm64/tailwindcss-oxide.darwin-arm64.node",
+        "**/node_modules/lightningcss-darwin-arm64/lightningcss.darwin-arm64.node"
+      ],
       "target": [
         {
           "target": "dmg",
