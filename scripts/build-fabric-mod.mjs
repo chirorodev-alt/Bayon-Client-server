@@ -8,9 +8,9 @@ const modRoot = path.join(projectRoot, 'fabric-mod');
 const wrapper = process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew';
 const wrapperPath = path.join(modRoot, wrapper);
 const wrapperJar = path.join(modRoot, 'gradle', 'wrapper', 'gradle-wrapper.jar');
-const useWrapperJar = process.platform !== 'win32' && !existsSync(wrapperPath);
+const useWrapperJar = process.platform !== 'win32';
 if (useWrapperJar && !existsSync(wrapperJar)) {
-  console.error('Could not run the Fabric build: the Gradle wrapper script and wrapper JAR are both missing.');
+  console.error('Could not run the Fabric build: the Gradle wrapper JAR is missing.');
   process.exit(1);
 }
 const command = useWrapperJar ? 'java' : wrapper;
